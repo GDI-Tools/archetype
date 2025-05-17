@@ -3,7 +3,7 @@
 namespace Archetype\Exceptions;
 
 use Archetype\Exceptions\ApiException;
-use Archetype\http\HttpStatus;
+use Archetype\Http\HttpStatus;
 
 class ApiBadRequestException extends ApiException{
 	public function __construct(string $message = 'Bad Request', string $code = 'bad_request') {

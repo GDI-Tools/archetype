@@ -10,7 +10,7 @@
 
 namespace Archetype\Attributes;
 
-use Archetype\Api\HttpMethod;
+use Archetype\Http\HttpMethod;
 use Attribute;
 
 #[Attribute(Attribute::TARGET_METHOD)]

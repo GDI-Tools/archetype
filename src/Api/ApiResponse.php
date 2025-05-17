@@ -2,7 +2,7 @@
 
 namespace Archetype\Api;
 
-use Archetype\http\HttpStatus;
+use Archetype\Http\HttpStatus;
 use WP_Error;
 use WP_REST_Response;
 
