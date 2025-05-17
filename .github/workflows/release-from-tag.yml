@@ -1,0 +1,51 @@
+name: Create Release From Composer Version
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    name: Tag and Release If Version Changed
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # important to access full git history
+
+      - name: Get version from composer.json
+        id: version
+        run: |
+          VERSION=$(jq -r '.version' composer.json)
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Check if tag already exists
+        id: tagcheck
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.VERSION }}" >/dev/null 2>&1; then
+            echo "TAG_EXISTS=true" >> $GITHUB_OUTPUT
+          else
+            echo "TAG_EXISTS=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Git tag
+        if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag v${{ steps.version.outputs.VERSION }}
+          git push origin v${{ steps.version.outputs.VERSION }}
+
+      - name: Create GitHub Release
+        if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.VERSION }}
+          name: Release v${{ steps.version.outputs.VERSION }}
+          body: |
+            Auto-release from composer version v${{ steps.version.outputs.VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
