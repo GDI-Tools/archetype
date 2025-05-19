@@ -1,7 +1,7 @@
 {
   "name": "rolis/archetype",
   "description": "A modern attribute-based framework for WordPress plugin development",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "library",
   "license": "GPL-2.0-or-later",
   "authors": [
