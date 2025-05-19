@@ -19,9 +19,13 @@ class SchemaExtractor {
 
 	public function extractFromModel(BaseModel $model): array {
 		$schema = [];
-		$tempTableName = 'temp_schema_extract_' . md5(get_class($model) . time());
+        $tempTableName = 'temp_schema_extract_' . md5(get_class($model) . microtime(true));
 
 		try {
+            if ($this->schemaBuilder->hasTable($tempTableName)) {
+                $this->schemaBuilder->drop($tempTableName);
+            }
+
 			// Create a temporary table with the model's schema
 			$this->schemaBuilder->create($tempTableName, function ($table) use ($model) {
 				if ($model->incrementing) {
