@@ -23,18 +23,19 @@ abstract class BaseModel extends EloquentModel {
 	 */
 	public $timestamps = true;
 
-//	/**
-//	 * Override to allow for easier where queries using the global query builder
-//	 *
-//	 * @param mixed $column
-//	 * @param mixed $operator
-//	 * @param mixed $value
-//	 * @param string $boolean
-//	 * @return Builder
-//	 */
-//	public static function where($column, $operator = null, $value = null, $boolean = 'and') {
-//		return static::query()->where(...func_get_args());
-//	}
+    /**
+     * Enable auto-incrementing primary keys
+     *
+     * @var bool
+     */
+    public $incrementing = true;
+
+    /**
+     * The data type of the auto-incrementing ID.
+     *
+     * @var string
+     */
+    protected $keyType = 'int';
 
 	/**
 	 * Method for defining schema
