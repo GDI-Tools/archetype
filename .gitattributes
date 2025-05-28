@@ -6,3 +6,4 @@
 /composer.lock           export-ignore
 /docker/                 export-ignore
 /README.md               export-ignore
+/docs                    export-ignore
