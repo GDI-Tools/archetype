@@ -1,5 +1,7 @@
 # Archetype WordPress Plugin Framework
 
+![archetype](/docs/images/archetype.png)
+
 **Version:** 1.0.5  
 **Author:** Vitalii Sili  
 **License:** GPL-2.0-or-later
