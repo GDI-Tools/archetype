@@ -23,7 +23,7 @@ class SchemaExtractor {
 
     public function extractFromModel(BaseModel $model): array {
         $schema = [];
-        $tempTableName = $this->generateUniqueTempTableName(get_class($model));
+        $tempTableName = $this->generateShortTempTableName(get_class($model));
 
         try {
             ArchetypeLogger::debug("Starting schema extraction for " . get_class($model), [
@@ -38,7 +38,7 @@ class SchemaExtractor {
                 $this->dropTempTableSafely($tempTableName);
             }
 
-            // Create temporary table with retry mechanism
+            // Create temporary table WITHOUT transaction to avoid nested transaction issues
             $this->createTempTableWithModel($tempTableName, $model);
 
             // Track this temp table for cleanup
@@ -58,11 +58,10 @@ class SchemaExtractor {
         } catch (\Exception $e) {
             ArchetypeLogger::error("Schema extraction failed for " . get_class($model), [
                 'temp_table' => $tempTableName,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error' => $e->getMessage()
             ]);
 
-            // Don't rethrow - return empty schema and let migration system handle it
+            // Return empty schema and let migration system handle it gracefully
             $schema = [];
         } finally {
             // Always attempt cleanup
@@ -73,58 +72,58 @@ class SchemaExtractor {
     }
 
     /**
-     * Generate a unique temporary table name to avoid conflicts
+     * Generate a shorter temporary table name to avoid MySQL 64-char limit for index names
      */
-    private function generateUniqueTempTableName(string $modelClass): string {
-        $classHash = substr(md5($modelClass), 0, 8);
-        $timeHash = substr(md5((string)microtime(true)), 0, 8);
-        $randomHash = substr(md5(uniqid('', true)), 0, 8);
+    private function generateShortTempTableName(string $modelClass): string {
+        // Use only the class name without namespace
+        $className = basename(str_replace('\\', '/', $modelClass));
 
-        return 'temp_schema_' . $classHash . '_' . $timeHash . '_' . $randomHash;
+        // Create a short hash from the full class name + microtime
+        $hash = substr(md5($modelClass . microtime(true)), 0, 8);
+
+        // Keep it short: tmp_[ClassName]_[8chars]
+        return 'tmp_' . strtolower($className) . '_' . $hash;
     }
 
     /**
-     * Create temporary table with model schema using transaction
+     * Create temporary table with model schema WITHOUT using transactions
      */
     private function createTempTableWithModel(string $tempTableName, BaseModel $model): void {
-        $conn = $this->schemaBuilder->getConnection();
+        try {
+            // Create a custom blueprint that limits index name lengths
+            $this->schemaBuilder->create($tempTableName, function ($table) use ($model, $tempTableName) {
+                // Add ID if the model uses auto-incrementing
+                if ($model->incrementing) {
+                    $table->id();
+                }
 
-        // Use transaction for atomicity
-        $conn->transaction(function() use ($tempTableName, $model) {
-            try {
-                $this->schemaBuilder->create($tempTableName, function ($table) use ($model) {
-                    // Add ID if the model uses auto-incrementing
-                    if ($model->incrementing) {
-                        $table->id();
-                    }
+                // Call model's schema definition with custom table wrapper
+                if (method_exists($model, 'defineSchema')) {
+                    $wrappedTable = new IndexNameLimitingBlueprint($table, $tempTableName);
+                    $model->defineSchema($wrappedTable);
+                }
 
-                    // Call model's schema definition
-                    if (method_exists($model, 'defineSchema')) {
-                        $model->defineSchema($table);
-                    }
+                // Add timestamps if the model uses them
+                if ($model->timestamps) {
+                    $table->timestamps();
+                }
+            });
 
-                    // Add timestamps if the model uses them
-                    if ($model->timestamps) {
-                        $table->timestamps();
-                    }
-                });
+            ArchetypeLogger::debug("Created temporary table successfully", [
+                'temp_table' => $tempTableName
+            ]);
 
-                ArchetypeLogger::debug("Created temporary table successfully", [
-                    'temp_table' => $tempTableName
-                ]);
-
-            } catch (\Exception $e) {
-                ArchetypeLogger::error("Failed to create temporary table", [
-                    'temp_table' => $tempTableName,
-                    'error' => $e->getMessage()
-                ]);
-                throw $e;
-            }
-        });
+        } catch (\Exception $e) {
+            ArchetypeLogger::error("Failed to create temporary table", [
+                'temp_table' => $tempTableName,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
+        }
     }
 
     /**
-     * Extract schema using Doctrine DBAL with better error handling
+     * Extract schema using Doctrine DBAL with improved error handling
      */
     private function extractSchemaWithDoctrine(string $tableName): array {
         $schema = [];
@@ -199,7 +198,7 @@ class SchemaExtractor {
     }
 
     /**
-     * Extract schema using basic SQL queries with improved error handling
+     * Extract schema using basic SQL queries
      */
     private function extractSchemaBasic(string $tableName): array {
         $schema = [];
@@ -317,7 +316,7 @@ class SchemaExtractor {
     }
 
     /**
-     * Parse MySQL column type definition with better handling
+     * Parse MySQL column type definition
      */
     private function parseColumnType(string $typeString): array {
         $type = $typeString;
@@ -437,5 +436,60 @@ class SchemaExtractor {
      */
     public static function getActiveTempTables(): array {
         return self::$activeTempTables;
+    }
+}
+
+/**
+ * Blueprint wrapper that limits index name lengths to avoid MySQL's 64-character limit
+ */
+class IndexNameLimitingBlueprint {
+    private $blueprint;
+    private string $tableName;
+
+    public function __construct($blueprint, string $tableName) {
+        $this->blueprint = $blueprint;
+        $this->tableName = $tableName;
+    }
+
+    /**
+     * Create an index with a shortened name
+     */
+    public function index($columns, $name = null, $algorithm = null) {
+        if ($name === null) {
+            // Generate a short index name to avoid MySQL's 64-character limit
+            $columnString = is_array($columns) ? implode('_', $columns) : $columns;
+            $name = 'idx_' . substr(md5($this->tableName . '_' . $columnString), 0, 8);
+        }
+
+        // Ensure name doesn't exceed MySQL's limit
+        if (strlen($name) > 64) {
+            $name = substr($name, 0, 60) . '_' . substr(md5($name), 0, 3);
+        }
+
+        return $this->blueprint->index($columns, $name, $algorithm);
+    }
+
+    /**
+     * Create a unique index with a shortened name
+     */
+    public function unique($columns, $name = null, $algorithm = null) {
+        if ($name === null) {
+            $columnString = is_array($columns) ? implode('_', $columns) : $columns;
+            $name = 'unq_' . substr(md5($this->tableName . '_' . $columnString), 0, 8);
+        }
+
+        // Ensure name doesn't exceed MySQL's limit
+        if (strlen($name) > 64) {
+            $name = substr($name, 0, 60) . '_' . substr(md5($name), 0, 3);
+        }
+
+        return $this->blueprint->unique($columns, $name, $algorithm);
+    }
+
+    /**
+     * Delegate all other method calls to the original blueprint
+     */
+    public function __call($method, $arguments) {
+        return call_user_func_array([$this->blueprint, $method], $arguments);
     }
 }
