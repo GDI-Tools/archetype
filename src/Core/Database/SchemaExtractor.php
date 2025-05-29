@@ -86,21 +86,20 @@ class SchemaExtractor {
     }
 
     /**
-     * Create temporary table with model schema WITHOUT using transactions
+     * Create temporary table with model schema - FIXED VERSION
      */
     private function createTempTableWithModel(string $tempTableName, BaseModel $model): void {
         try {
-            // Create a custom blueprint that limits index name lengths
-            $this->schemaBuilder->create($tempTableName, function ($table) use ($model, $tempTableName) {
+            // Create table normally without wrapper to avoid type issues
+            $this->schemaBuilder->create($tempTableName, function ($table) use ($model) {
                 // Add ID if the model uses auto-incrementing
                 if ($model->incrementing) {
                     $table->id();
                 }
 
-                // Call model's schema definition with custom table wrapper
+                // Call model's schema definition with the actual Blueprint
                 if (method_exists($model, 'defineSchema')) {
-                    $wrappedTable = new IndexNameLimitingBlueprint($table, $tempTableName);
-                    $model->defineSchema($wrappedTable);
+                    $model->defineSchema($table);
                 }
 
                 // Add timestamps if the model uses them
@@ -436,60 +435,5 @@ class SchemaExtractor {
      */
     public static function getActiveTempTables(): array {
         return self::$activeTempTables;
-    }
-}
-
-/**
- * Blueprint wrapper that limits index name lengths to avoid MySQL's 64-character limit
- */
-class IndexNameLimitingBlueprint {
-    private $blueprint;
-    private string $tableName;
-
-    public function __construct($blueprint, string $tableName) {
-        $this->blueprint = $blueprint;
-        $this->tableName = $tableName;
-    }
-
-    /**
-     * Create an index with a shortened name
-     */
-    public function index($columns, $name = null, $algorithm = null) {
-        if ($name === null) {
-            // Generate a short index name to avoid MySQL's 64-character limit
-            $columnString = is_array($columns) ? implode('_', $columns) : $columns;
-            $name = 'idx_' . substr(md5($this->tableName . '_' . $columnString), 0, 8);
-        }
-
-        // Ensure name doesn't exceed MySQL's limit
-        if (strlen($name) > 64) {
-            $name = substr($name, 0, 60) . '_' . substr(md5($name), 0, 3);
-        }
-
-        return $this->blueprint->index($columns, $name, $algorithm);
-    }
-
-    /**
-     * Create a unique index with a shortened name
-     */
-    public function unique($columns, $name = null, $algorithm = null) {
-        if ($name === null) {
-            $columnString = is_array($columns) ? implode('_', $columns) : $columns;
-            $name = 'unq_' . substr(md5($this->tableName . '_' . $columnString), 0, 8);
-        }
-
-        // Ensure name doesn't exceed MySQL's limit
-        if (strlen($name) > 64) {
-            $name = substr($name, 0, 60) . '_' . substr(md5($name), 0, 3);
-        }
-
-        return $this->blueprint->unique($columns, $name, $algorithm);
-    }
-
-    /**
-     * Delegate all other method calls to the original blueprint
-     */
-    public function __call($method, $arguments) {
-        return call_user_func_array([$this->blueprint, $method], $arguments);
     }
 }
