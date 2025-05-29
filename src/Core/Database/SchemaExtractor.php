@@ -8,6 +8,7 @@ use Illuminate\Database\Schema\Builder as SchemaBuilder;
 class SchemaExtractor {
     private SchemaBuilder $schemaBuilder;
     private bool $doctrineDbalAvailable;
+    private static array $activeTempTables = [];
 
     public function __construct(
         SchemaBuilder $schemaBuilder,
@@ -15,69 +16,139 @@ class SchemaExtractor {
     ) {
         $this->schemaBuilder = $schemaBuilder;
         $this->doctrineDbalAvailable = $doctrineDbalAvailable;
+
+        // Register shutdown function to cleanup any remaining temp tables
+        register_shutdown_function([$this, 'cleanupAllTempTables']);
     }
 
     public function extractFromModel(BaseModel $model): array {
         $schema = [];
-        $tempTableName = 'temp_' . substr(md5(get_class($model) . microtime(true)), 0, 20);
+        $tempTableName = $this->generateUniqueTempTableName(get_class($model));
 
         try {
+            ArchetypeLogger::debug("Starting schema extraction for " . get_class($model), [
+                'temp_table' => $tempTableName
+            ]);
+
+            // Check if temp table already exists and drop it
             if ($this->schemaBuilder->hasTable($tempTableName)) {
-                $this->schemaBuilder->drop($tempTableName);
+                ArchetypeLogger::warning("Temp table already exists, dropping it", [
+                    'temp_table' => $tempTableName
+                ]);
+                $this->dropTempTableSafely($tempTableName);
             }
 
-            // Create a temporary table with the model's schema
-            $this->schemaBuilder->create($tempTableName, function ($table) use ($model) {
-                if ($model->incrementing) {
-                    $table->id();
-                }
+            // Create temporary table with retry mechanism
+            $this->createTempTableWithModel($tempTableName, $model);
 
-                $model->defineSchema($table);
+            // Track this temp table for cleanup
+            self::$activeTempTables[$tempTableName] = time();
 
-                if ($model->timestamps) {
-                    $table->timestamps();
-                }
-            });
-
-            // Extract schema - method depends on available libraries
+            // Extract schema using appropriate method
             if ($this->doctrineDbalAvailable) {
                 $schema = $this->extractSchemaWithDoctrine($tempTableName);
             } else {
                 $schema = $this->extractSchemaBasic($tempTableName);
             }
 
-            // Drop the temporary table
-            $this->schemaBuilder->drop($tempTableName);
+            ArchetypeLogger::debug("Successfully extracted schema for " . get_class($model), [
+                'columns_found' => count($schema)
+            ]);
 
-            ArchetypeLogger::debug("Successfully extracted schema for " . get_class($model));
         } catch (\Exception $e) {
-            ArchetypeLogger::error("Failed to extract schema: " . $e->getMessage());
+            ArchetypeLogger::error("Schema extraction failed for " . get_class($model), [
+                'temp_table' => $tempTableName,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
 
-            // Ensure temporary table is cleaned up
-            try {
-                if ($this->schemaBuilder->hasTable($tempTableName)) {
-                    $this->schemaBuilder->drop($tempTableName);
-                }
-            } catch (\Exception $dropException) {
-                ArchetypeLogger::error("Failed to drop temporary table: " . $dropException->getMessage());
-            }
+            // Don't rethrow - return empty schema and let migration system handle it
+            $schema = [];
+        } finally {
+            // Always attempt cleanup
+            $this->cleanupTempTable($tempTableName);
         }
 
         return $schema;
     }
 
+    /**
+     * Generate a unique temporary table name to avoid conflicts
+     */
+    private function generateUniqueTempTableName(string $modelClass): string {
+        $classHash = substr(md5($modelClass), 0, 8);
+        $timeHash = substr(md5((string)microtime(true)), 0, 8);
+        $randomHash = substr(md5(uniqid('', true)), 0, 8);
+
+        return 'temp_schema_' . $classHash . '_' . $timeHash . '_' . $randomHash;
+    }
+
+    /**
+     * Create temporary table with model schema using transaction
+     */
+    private function createTempTableWithModel(string $tempTableName, BaseModel $model): void {
+        $conn = $this->schemaBuilder->getConnection();
+
+        // Use transaction for atomicity
+        $conn->transaction(function() use ($tempTableName, $model) {
+            try {
+                $this->schemaBuilder->create($tempTableName, function ($table) use ($model) {
+                    // Add ID if the model uses auto-incrementing
+                    if ($model->incrementing) {
+                        $table->id();
+                    }
+
+                    // Call model's schema definition
+                    if (method_exists($model, 'defineSchema')) {
+                        $model->defineSchema($table);
+                    }
+
+                    // Add timestamps if the model uses them
+                    if ($model->timestamps) {
+                        $table->timestamps();
+                    }
+                });
+
+                ArchetypeLogger::debug("Created temporary table successfully", [
+                    'temp_table' => $tempTableName
+                ]);
+
+            } catch (\Exception $e) {
+                ArchetypeLogger::error("Failed to create temporary table", [
+                    'temp_table' => $tempTableName,
+                    'error' => $e->getMessage()
+                ]);
+                throw $e;
+            }
+        });
+    }
+
+    /**
+     * Extract schema using Doctrine DBAL with better error handling
+     */
     private function extractSchemaWithDoctrine(string $tableName): array {
         $schema = [];
 
         try {
             $conn = $this->schemaBuilder->getConnection();
-            $doctrineSchemaManager = $conn->getDoctrineSchemaManager();
 
-            // Get platform-specific table name (including any prefixes)
+            // Verify connection is still valid
+            if (!$this->verifyConnection($conn)) {
+                throw new \Exception("Database connection is not valid");
+            }
+
+            $doctrineSchemaManager = $conn->getDoctrineSchemaManager();
             $platformTableName = $conn->getTablePrefix() . $tableName;
 
-            // Use listTableColumns instead of direct access
-            $columns = $doctrineSchemaManager->listTableColumns($platformTableName);
+            // Check if table exists before trying to read it
+            if (!$this->schemaBuilder->hasTable($tableName)) {
+                throw new \Exception("Temporary table does not exist: {$tableName}");
+            }
+
+            // Get table columns with retry mechanism
+            $columns = $this->executeWithRetry(function() use ($doctrineSchemaManager, $platformTableName) {
+                return $doctrineSchemaManager->listTableColumns($platformTableName);
+            }, 2);
 
             foreach ($columns as $column) {
                 $schema[$column->getName()] = [
@@ -90,58 +161,96 @@ class SchemaExtractor {
                     'scale' => $column->getScale(),
                     'autoincrement' => $column->getAutoincrement(),
                     'comment' => $column->getComment(),
+                    'unique' => false // Will be set below
                 ];
             }
 
-            // Add unique constraints
-            $indices = $doctrineSchemaManager->listTableIndexes($platformTableName);
-            foreach ($indices as $index) {
-                if ($index->isUnique() && count($index->getColumns()) === 1) {
-                    $columnName = $index->getColumns()[0];
-                    if (isset($schema[$columnName])) {
-                        $schema[$columnName]['unique'] = true;
+            // Get unique constraints with error handling
+            try {
+                $indices = $this->executeWithRetry(function() use ($doctrineSchemaManager, $platformTableName) {
+                    return $doctrineSchemaManager->listTableIndexes($platformTableName);
+                }, 2);
+
+                foreach ($indices as $index) {
+                    if ($index->isUnique() && count($index->getColumns()) === 1) {
+                        $columnName = $index->getColumns()[0];
+                        if (isset($schema[$columnName])) {
+                            $schema[$columnName]['unique'] = true;
+                        }
                     }
                 }
+            } catch (\Exception $e) {
+                ArchetypeLogger::warning("Could not extract index information", [
+                    'table' => $tableName,
+                    'error' => $e->getMessage()
+                ]);
+                // Continue without index information
             }
+
         } catch (\Exception $e) {
-            ArchetypeLogger::error("Error extracting schema with Doctrine: " . $e->getMessage());
+            ArchetypeLogger::error("Doctrine schema extraction failed", [
+                'table' => $tableName,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
         }
 
         return $schema;
     }
 
+    /**
+     * Extract schema using basic SQL queries with improved error handling
+     */
     private function extractSchemaBasic(string $tableName): array {
         $schema = [];
 
         try {
             $conn = $this->schemaBuilder->getConnection();
-            $prefix = $conn->getTablePrefix();
 
-            // Get the fully qualified table name
+            // Verify connection is still valid
+            if (!$this->verifyConnection($conn)) {
+                throw new \Exception("Database connection is not valid");
+            }
+
+            $prefix = $conn->getTablePrefix();
             $fullTableName = $prefix . $tableName;
 
-            // Use SHOW COLUMNS query
-            $columns = $conn->select("SHOW COLUMNS FROM `{$fullTableName}`");
+            // Check if table exists
+            if (!$this->schemaBuilder->hasTable($tableName)) {
+                throw new \Exception("Temporary table does not exist: {$tableName}");
+            }
+
+            // Get columns with retry mechanism
+            $columns = $this->executeWithRetry(function() use ($conn, $fullTableName) {
+                return $conn->select("SHOW COLUMNS FROM `{$fullTableName}`");
+            }, 3);
+
+            if (empty($columns)) {
+                throw new \Exception("No columns found for table: {$tableName}");
+            }
 
             foreach ($columns as $column) {
-                // Parse type and length from Type column (e.g., "varchar(255)" -> "varchar" and 255)
                 $typeInfo = $this->parseColumnType($column->Type);
 
                 $schema[$column->Field] = [
                     'name' => $column->Field,
                     'type' => strtoupper($typeInfo['type']),
-                    'length' => $typeInfo['length'],
+                    'length' => $typeInfo['length'] ?? null,
+                    'precision' => $typeInfo['precision'] ?? null,
+                    'scale' => $typeInfo['scale'] ?? null,
                     'nullable' => $column->Null === 'YES',
                     'default' => $column->Default,
-                    'unique' => $column->Key === 'UNI', // Basic uniqueness detection
+                    'unique' => $column->Key === 'UNI',
                     'primary' => $column->Key === 'PRI',
-                    'autoincrement' => strpos($column->Extra, 'auto_increment') !== false,
+                    'autoincrement' => strpos($column->Extra ?? '', 'auto_increment') !== false,
                 ];
             }
 
-            // Additional query to get indices (for better uniqueness detection)
+            // Get additional index information with error handling
             try {
-                $indices = $conn->select("SHOW INDEXES FROM `{$fullTableName}`");
+                $indices = $this->executeWithRetry(function() use ($conn, $fullTableName) {
+                    return $conn->select("SHOW INDEXES FROM `{$fullTableName}`");
+                }, 2);
 
                 foreach ($indices as $index) {
                     if ($index->Non_unique == 0 && isset($schema[$index->Column_name])) {
@@ -149,48 +258,97 @@ class SchemaExtractor {
                     }
                 }
             } catch (\Exception $e) {
-                ArchetypeLogger::warning("Error getting index information: " . $e->getMessage());
+                ArchetypeLogger::warning("Could not get index information", [
+                    'table' => $tableName,
+                    'error' => $e->getMessage()
+                ]);
+                // Continue without additional index information
             }
+
         } catch (\Exception $e) {
-            ArchetypeLogger::error("Error extracting basic schema: " . $e->getMessage());
+            ArchetypeLogger::error("Basic schema extraction failed", [
+                'table' => $tableName,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
         }
 
         return $schema;
     }
 
     /**
-     * Parse MySQL column type definition
-     *
-     * @param string $typeString Type definition (e.g., "varchar(255)" or "int(11)")
-     * @return array Associative array with 'type' and 'length' keys
+     * Execute a function with retry mechanism
+     */
+    private function executeWithRetry(callable $function, int $maxRetries = 3, int $delayMs = 100) {
+        $lastException = null;
+
+        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+            try {
+                return $function();
+            } catch (\Exception $e) {
+                $lastException = $e;
+
+                ArchetypeLogger::warning("Execution attempt {$attempt}/{$maxRetries} failed", [
+                    'error' => $e->getMessage()
+                ]);
+
+                if ($attempt < $maxRetries) {
+                    usleep($delayMs * 1000 * $attempt); // Exponential backoff
+                }
+            }
+        }
+
+        throw $lastException;
+    }
+
+    /**
+     * Verify database connection is still valid
+     */
+    private function verifyConnection($connection): bool {
+        try {
+            $connection->select('SELECT 1');
+            return true;
+        } catch (\Exception $e) {
+            ArchetypeLogger::warning("Database connection verification failed", [
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Parse MySQL column type definition with better handling
      */
     private function parseColumnType(string $typeString): array {
         $type = $typeString;
         $length = null;
+        $precision = null;
+        $scale = null;
 
-        // Extract length if present
-        if (preg_match('/^([a-z]+)\((\d+)(?:,(\d+))?\)/', $typeString, $matches)) {
+        // Handle complex type definitions
+        if (preg_match('/^([a-z]+)\((\d+)(?:,(\d+))?\)/', strtolower($typeString), $matches)) {
             $type = $matches[1];
             $length = (int)$matches[2];
 
-            // For decimal, we also have scale
             if (isset($matches[3])) {
                 $scale = (int)$matches[3];
-                return [
-                    'type' => $type,
-                    'length' => $length,
-                    'precision' => $length,
-                    'scale' => $scale
-                ];
+                $precision = $length;
             }
+        } elseif (preg_match('/^([a-z]+)/', strtolower($typeString), $matches)) {
+            $type = $matches[1];
         }
 
         return [
             'type' => $type,
-            'length' => $length
+            'length' => $length,
+            'precision' => $precision,
+            'scale' => $scale
         ];
     }
 
+    /**
+     * Map Doctrine DBAL types to MySQL types
+     */
     private function mapDoctrineType(string $doctrineType): string {
         $map = [
             'smallint' => 'SMALLINT',
@@ -212,5 +370,72 @@ class SchemaExtractor {
         ];
 
         return $map[$doctrineType] ?? 'VARCHAR';
+    }
+
+    /**
+     * Safely drop temporary table with error handling
+     */
+    private function dropTempTableSafely(string $tempTableName): void {
+        try {
+            if ($this->schemaBuilder->hasTable($tempTableName)) {
+                $this->schemaBuilder->drop($tempTableName);
+                ArchetypeLogger::debug("Dropped temporary table", [
+                    'temp_table' => $tempTableName
+                ]);
+            }
+        } catch (\Exception $e) {
+            ArchetypeLogger::warning("Could not drop temporary table", [
+                'temp_table' => $tempTableName,
+                'error' => $e->getMessage()
+            ]);
+
+            // Try alternative drop method
+            try {
+                $conn = $this->schemaBuilder->getConnection();
+                $conn->statement("DROP TABLE IF EXISTS `" . $conn->getTablePrefix() . $tempTableName . "`");
+                ArchetypeLogger::debug("Force dropped temporary table", [
+                    'temp_table' => $tempTableName
+                ]);
+            } catch (\Exception $e2) {
+                ArchetypeLogger::error("Failed to force drop temporary table", [
+                    'temp_table' => $tempTableName,
+                    'error' => $e2->getMessage()
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Cleanup temporary table and remove from tracking
+     */
+    private function cleanupTempTable(string $tempTableName): void {
+        $this->dropTempTableSafely($tempTableName);
+        unset(self::$activeTempTables[$tempTableName]);
+    }
+
+    /**
+     * Cleanup all remaining temporary tables (called on shutdown)
+     */
+    public function cleanupAllTempTables(): void {
+        if (empty(self::$activeTempTables)) {
+            return;
+        }
+
+        ArchetypeLogger::info("Cleaning up remaining temporary tables", [
+            'count' => count(self::$activeTempTables)
+        ]);
+
+        foreach (array_keys(self::$activeTempTables) as $tempTableName) {
+            $this->cleanupTempTable($tempTableName);
+        }
+
+        self::$activeTempTables = [];
+    }
+
+    /**
+     * Get list of active temporary tables (for debugging)
+     */
+    public static function getActiveTempTables(): array {
+        return self::$activeTempTables;
     }
 }
