@@ -1,174 +1,257 @@
 <?php
 /**
- * Comprehensive dependency checker for Archetype bundling
- * This script analyzes what dependencies are actually needed
+ * Comprehensive dependency and function scanner for Archetype
+ * Scans all bundled code to find missing functions and dependencies
  */
 
-echo "🔍 Analyzing Illuminate dependencies...\n";
-echo "=====================================\n\n";
+echo "🔍 Comprehensive Dependency & Function Scanner\n";
+echo "=============================================\n\n";
 
-$vendorDir = __DIR__ . '/vendor';
-if (!is_dir($vendorDir)) {
-    echo "❌ Error: vendor/ directory not found. Run 'composer install --dev' first.\n";
+$libDir = __DIR__ . '/lib';
+$srcDir = __DIR__ . '/src';
+
+if (!is_dir($libDir)) {
+    echo "❌ Error: lib/ directory not found. Run bundle script first.\n";
     exit(1);
 }
 
-// Core packages we want to analyze
-$corePackages = [
-    'illuminate/database',
-    'illuminate/support',
-    'illuminate/container',
-    'illuminate/events',
-    'illuminate/contracts',
-    'illuminate/collections',
-];
+$missingFunctions = [];
+$missingClasses = [];
+$allFunctions = [];
+$definedFunctions = [];
+$helperFiles = [];
 
-$allDependencies = [];
+/**
+ * Extract function calls from PHP code
+ */
+function extractFunctionCalls($content) {
+    $functions = [];
 
-// Function to extract dependencies from composer.json
-function extractDependencies($packagePath) {
-    $composerFile = $packagePath . '/composer.json';
-    if (!file_exists($composerFile)) {
-        return [];
-    }
-
-    $composer = json_decode(file_get_contents($composerFile), true);
-    $dependencies = [];
-
-    if (isset($composer['require'])) {
-        foreach ($composer['require'] as $package => $version) {
-            // Skip PHP version requirement
-            if ($package !== 'php' && $package !== 'ext-*') {
-                $dependencies[] = $package;
+    // Pattern to match function calls
+    if (preg_match_all('/([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/', $content, $matches)) {
+        foreach ($matches[1] as $func) {
+            // Skip language constructs and obvious methods
+            if (!in_array(strtolower($func), [
+                'if', 'else', 'elseif', 'while', 'for', 'foreach', 'switch', 'case', 'default',
+                'function', 'class', 'interface', 'trait', 'extends', 'implements', 'public',
+                'private', 'protected', 'static', 'final', 'abstract', 'return', 'echo', 'print',
+                'isset', 'empty', 'unset', 'array', 'list', 'new', 'clone', 'instanceof', 'self',
+                'parent', 'this', 'count', 'strlen', 'substr', 'explode', 'implode', 'trim',
+                'strtolower', 'strtoupper', 'is_array', 'is_string', 'is_null', 'is_object',
+                'is_callable', 'method_exists', 'class_exists', 'interface_exists', 'defined'
+            ])) {
+                $functions[] = $func;
             }
         }
     }
 
-    return $dependencies;
+    return array_unique($functions);
 }
 
-// Function to recursively find all dependencies
-function findAllDependencies($package, $vendorDir, &$found = []) {
-    if (in_array($package, $found)) {
-        return; // Already processed
+/**
+ * Extract class usage from PHP code
+ */
+function extractClassUsage($content) {
+    $classes = [];
+
+    // Extract use statements
+    if (preg_match_all('/use\s+([\\\\a-zA-Z0-9_]+)(?:\s+as\s+[a-zA-Z0-9_]+)?;/', $content, $matches)) {
+        $classes = array_merge($classes, $matches[1]);
     }
 
-    $found[] = $package;
-    $packagePath = $vendorDir . '/' . $package;
-
-    if (!is_dir($packagePath)) {
-        echo "⚠️  Package not found: {$package}\n";
-        return;
+    // Extract new ClassName() calls
+    if (preg_match_all('/new\s+([\\\\a-zA-Z0-9_]+)\s*\(/', $content, $matches)) {
+        $classes = array_merge($classes, $matches[1]);
     }
 
-    $dependencies = extractDependencies($packagePath);
-    foreach ($dependencies as $dep) {
-        findAllDependencies($dep, $vendorDir, $found);
+    // Extract ClassName:: static calls
+    if (preg_match_all('/([\\\\a-zA-Z0-9_]+)::[a-zA-Z0-9_]+/', $content, $matches)) {
+        $classes = array_merge($classes, $matches[1]);
     }
+
+    return array_unique($classes);
 }
 
-// Analyze each core package
-foreach ($corePackages as $package) {
-    echo "📦 Analyzing {$package}...\n";
-    $packageDeps = [];
-    findAllDependencies($package, $vendorDir, $packageDeps);
+/**
+ * Extract function definitions from PHP code
+ */
+function extractFunctionDefinitions($content) {
+    $functions = [];
 
-    echo "   Dependencies found: " . count($packageDeps) . "\n";
-    foreach ($packageDeps as $dep) {
-        if (!in_array($dep, $allDependencies)) {
-            $allDependencies[] = $dep;
-        }
+    // Extract function definitions
+    if (preg_match_all('/function\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/', $content, $matches)) {
+        $functions = array_merge($functions, $matches[1]);
     }
-    echo "\n";
+
+    return array_unique($functions);
 }
 
-// Sort and display all unique dependencies
-sort($allDependencies);
+/**
+ * Scan directory recursively
+ */
+function scanDirectory($dir, $baseDir = null) {
+    global $missingFunctions, $missingClasses, $allFunctions, $definedFunctions, $helperFiles;
 
-echo "📋 Complete dependency list (" . count($allDependencies) . " packages):\n";
-echo "===========================================\n";
-
-$categorized = [
-    'illuminate' => [],
-    'psr' => [],
-    'doctrine' => [],
-    'symfony' => [],
-    'laravel' => [],
-    'others' => []
-];
-
-foreach ($allDependencies as $dep) {
-    if (strpos($dep, 'illuminate/') === 0) {
-        $categorized['illuminate'][] = $dep;
-    } elseif (strpos($dep, 'psr/') === 0) {
-        $categorized['psr'][] = $dep;
-    } elseif (strpos($dep, 'doctrine/') === 0) {
-        $categorized['doctrine'][] = $dep;
-    } elseif (strpos($dep, 'symfony/') === 0) {
-        $categorized['symfony'][] = $dep;
-    } elseif (strpos($dep, 'laravel/') === 0) {
-        $categorized['laravel'][] = $dep;
-    } else {
-        $categorized['others'][] = $dep;
+    if ($baseDir === null) {
+        $baseDir = $dir;
     }
-}
 
-foreach ($categorized as $category => $packages) {
-    if (!empty($packages)) {
-        echo "\n🔸 " . ucfirst($category) . " packages:\n";
-        foreach ($packages as $package) {
-            $packagePath = $vendorDir . '/' . $package;
-            $size = 0;
-            if (is_dir($packagePath)) {
-                $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($packagePath));
-                foreach ($iterator as $file) {
-                    if ($file->isFile()) {
-                        $size += $file->getSize();
-                    }
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS)
+    );
+
+    foreach ($iterator as $file) {
+        if ($file->isFile() && $file->getExtension() === 'php') {
+            $relativePath = str_replace($baseDir, '', $file->getPathname());
+
+            // Check if this looks like a helper file
+            if (strpos($relativePath, 'helper') !== false ||
+                basename($file) === 'functions.php' ||
+                basename($file) === 'helpers.php') {
+                $helperFiles[] = $relativePath;
+            }
+
+            $content = file_get_contents($file->getPathname());
+
+            // Extract function calls
+            $functions = extractFunctionCalls($content);
+            foreach ($functions as $func) {
+                $allFunctions[$func] = ($allFunctions[$func] ?? 0) + 1;
+            }
+
+            // Extract function definitions
+            $definitions = extractFunctionDefinitions($content);
+            foreach ($definitions as $func) {
+                $definedFunctions[$func] = $relativePath;
+            }
+
+            // Extract class usage
+            $classes = extractClassUsage($content);
+            foreach ($classes as $class) {
+                if (!class_exists($class, false) && !interface_exists($class, false)) {
+                    $missingClasses[$class] = ($missingClasses[$class] ?? 0) + 1;
                 }
             }
-            $sizeFormatted = round($size / 1024, 1);
-            echo "   - {$package} ({$sizeFormatted} KB)\n";
         }
     }
 }
 
-// Generate bundle script configuration
-echo "\n🔧 Suggested bundle-dependencies.php configuration:\n";
-echo "===================================================\n";
+echo "📂 Scanning bundled libraries...\n";
+scanDirectory($libDir);
 
-echo "\$packages = [\n";
-foreach ($categorized as $category => $packages) {
-    if (!empty($packages)) {
-        echo "    // " . ucfirst($category) . " packages\n";
-        foreach ($packages as $package) {
-            echo "    '{$package}' => '{$package}',\n";
+echo "📂 Scanning Archetype source...\n";
+scanDirectory($srcDir);
+
+echo "\n📋 Analysis Results:\n";
+echo "===================\n\n";
+
+// Check for missing functions
+echo "🔍 Checking for missing functions...\n";
+$criticalMissingFunctions = [];
+foreach ($allFunctions as $func => $count) {
+    if (!function_exists($func) && !isset($definedFunctions[$func])) {
+        $criticalMissingFunctions[$func] = $count;
+    }
+}
+
+if (!empty($criticalMissingFunctions)) {
+    arsort($criticalMissingFunctions);
+    echo "❌ Missing functions (usage count):\n";
+    foreach (array_slice($criticalMissingFunctions, 0, 20, true) as $func => $count) {
+        echo "   - {$func} (used {$count} times)\n";
+    }
+} else {
+    echo "✅ All functions appear to be available\n";
+}
+
+echo "\n🔍 Helper files found:\n";
+if (!empty($helperFiles)) {
+    foreach ($helperFiles as $file) {
+        echo "   - {$file}\n";
+    }
+} else {
+    echo "   No helper files found\n";
+}
+
+echo "\n🔍 Function definitions found:\n";
+echo "Functions defined in bundled code: " . count($definedFunctions) . "\n";
+$importantDefined = array_intersect_key($definedFunctions, $criticalMissingFunctions);
+if (!empty($importantDefined)) {
+    echo "Important functions defined:\n";
+    foreach ($importantDefined as $func => $file) {
+        echo "   - {$func} in {$file}\n";
+    }
+}
+
+echo "\n🔧 Recommendations:\n";
+echo "===================\n";
+
+if (!empty($criticalMissingFunctions)) {
+    echo "1. Missing functions detected. You should:\n";
+    echo "   a) Check if these are Laravel helper functions\n";
+    echo "   b) Add them to the autoloader or include their files\n";
+    echo "   c) Look for helper files in the bundled packages\n\n";
+
+    // Suggest which packages might contain these functions
+    $likelyLaravelHelpers = array_filter(array_keys($criticalMissingFunctions), function($func) {
+        return in_array($func, [
+            'tap', 'value', 'data_get', 'data_set', 'collect', 'optional', 'retry', 'rescue',
+            'throw_if', 'throw_unless', 'with', 'filled', 'blank', 'class_basename',
+            'class_uses_recursive', 'trait_uses_recursive', 'head', 'last', 'windows_os'
+        ]);
+    });
+
+    if (!empty($likelyLaravelHelpers)) {
+        echo "🎯 Likely Laravel helper functions:\n";
+        foreach ($likelyLaravelHelpers as $func) {
+            echo "   - {$func}\n";
         }
         echo "\n";
     }
 }
-echo "];\n\n";
 
-// Calculate total estimated size
-$totalSize = 0;
-foreach ($allDependencies as $dep) {
-    $packagePath = $vendorDir . '/' . $dep;
-    if (is_dir($packagePath)) {
-        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($packagePath));
-        foreach ($iterator as $file) {
-            if ($file->isFile()) {
-                $totalSize += $file->getSize();
-            }
+if (!empty($helperFiles)) {
+    echo "2. Helper files to include in autoloader:\n";
+    foreach ($helperFiles as $file) {
+        echo "   require_once ARCHETYPE_LIB_PATH . '{$file}';\n";
+    }
+    echo "\n";
+}
+
+echo "3. Consider adding these to your autoloader:\n";
+echo "   - All helper files found above\n";
+echo "   - Manual definitions for critical missing functions\n";
+echo "   - Proper namespace mapping for missing classes\n\n";
+
+// Generate helper function definitions
+if (!empty($criticalMissingFunctions)) {
+    echo "🔧 Helper function templates (add to autoloader):\n";
+    echo "===================================================\n";
+
+    $commonHelpers = [
+        'tap' => "function tap(\$value, \$callback = null) {\n    if (is_null(\$callback)) {\n        return new class(\$value) {\n            public \$target;\n            public function __construct(\$target) { \$this->target = \$target; }\n            public function __call(\$method, \$parameters) {\n                \$this->target->{\$method}(...\$parameters);\n                return \$this->target;\n            }\n        };\n    }\n    \$callback(\$value);\n    return \$value;\n}",
+
+        'value' => "function value(\$value, ...\$args) {\n    return \$value instanceof Closure ? \$value(...\$args) : \$value;\n}",
+
+        'collect' => "function collect(\$value = null) {\n    return new Illuminate\\Support\\Collection(\$value);\n}",
+
+        'data_get' => "function data_get(\$target, \$key, \$default = null) {\n    if (is_null(\$key)) return \$target;\n    \$key = is_array(\$key) ? \$key : explode('.', \$key);\n    foreach (\$key as \$segment) {\n        if (is_array(\$target) && isset(\$target[\$segment])) {\n            \$target = \$target[\$segment];\n        } elseif (is_object(\$target) && isset(\$target->{\$segment})) {\n            \$target = \$target->{\$segment};\n        } else {\n            return \$default;\n        }\n    }\n    return \$target;\n}",
+
+        'filled' => "function filled(\$value) {\n    return !blank(\$value);\n}",
+
+        'blank' => "function blank(\$value) {\n    if (is_null(\$value)) return true;\n    if (is_string(\$value)) return trim(\$value) === '';\n    if (is_numeric(\$value) || is_bool(\$value)) return false;\n    if (\$value instanceof Countable) return count(\$value) === 0;\n    return empty(\$value);\n}",
+
+        'class_basename' => "function class_basename(\$class) {\n    \$class = is_object(\$class) ? get_class(\$class) : \$class;\n    return basename(str_replace('\\\\', '/', \$class));\n}",
+
+        'with' => "function with(\$value, callable \$callback = null) {\n    return is_null(\$callback) ? \$value : \$callback(\$value);\n}",
+    ];
+
+    foreach ($commonHelpers as $funcName => $definition) {
+        if (isset($criticalMissingFunctions[$funcName])) {
+            echo "\nif (!function_exists('{$funcName}')) {\n    {$definition}\n}\n";
         }
     }
 }
 
-$totalSizeFormatted = round($totalSize / 1024 / 1024, 2);
-echo "💾 Estimated total bundle size: {$totalSizeFormatted} MB\n";
-
-echo "\n✅ Analysis complete!\n";
-echo "💡 Next steps:\n";
-echo "   1. Update bundle-dependencies.php with the packages above\n";
-echo "   2. Update the autoloader to handle all these namespaces\n";
-echo "   3. Run the bundle script\n";
-echo "   4. Test thoroughly\n";
+echo "\n✅ Scan complete!\n";
+echo "💡 Use this information to update your autoloader with all missing dependencies.\n";
