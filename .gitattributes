@@ -9,5 +9,6 @@
 /docs                     export-ignore
 /bundle-dependencies.php  export-ignore
 /debug-autoloader.php     export-ignore
-/test-complete            export-ignore
-/vendor
+/test-complete.php        export-ignore
+/vendor                   export-ignore
+/dependency-cheker.php    export-ignore
