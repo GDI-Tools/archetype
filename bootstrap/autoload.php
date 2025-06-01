@@ -212,10 +212,6 @@ function archetype_load_uuid_functions_safely($filePath) {
     }
 
     if (!empty($conflictingFunctions)) {
-        // Log the conflict but don't fail
-        if (function_exists('error_log')) {
-            error_log('Archetype: UUID functions already exist, skipping: ' . implode(', ', $conflictingFunctions));
-        }
         return;
     }
 
