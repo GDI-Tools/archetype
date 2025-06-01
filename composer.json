@@ -1,7 +1,7 @@
 {
   "name": "rolis/archetype",
   "description": "A modern attribute-based framework for WordPress plugin development with bundled dependencies",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "type": "library",
   "license": "GPL-2.0-or-later",
   "authors": [
@@ -47,7 +47,7 @@
       "analog/analog"
     ],
     "archetype": {
-      "version": "1.0.15",
+      "version": "1.0.16",
       "build-date": "2025-06-01",
       "bundle-size": "~6.5MB",
       "conflict-free": true,
