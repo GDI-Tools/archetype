@@ -1,7 +1,7 @@
 <?php
 /**
- * Archetype Framework - Final Comprehensive Autoloader
- * Includes ALL bundled dependencies and helper functions
+ * Archetype Framework - Fixed Autoloader with Function Guards
+ * Prevents function redeclaration conflicts
  */
 
 // Prevent multiple loading
@@ -151,34 +151,84 @@ spl_autoload_register(function ($class) {
     return false;
 }, true, true);
 
-// Load ALL essential helper files found by the scanner
-$helperFiles = [
-    // Critical Laravel/Illuminate helpers
-    '/illuminate/support/helpers.php',
-    '/illuminate/support/functions.php',
-    '/illuminate/collections/helpers.php',
-    '/illuminate/collections/functions.php',
-    '/illuminate/events/functions.php',
+/**
+ * Load helper files with function guards to prevent redeclaration
+ */
+function archetype_load_helper_files_safely() {
+    $helperFiles = [
+        // Critical Laravel/Illuminate helpers
+        '/illuminate/support/helpers.php',
+        '/illuminate/support/functions.php',
+        '/illuminate/collections/helpers.php',
+        '/illuminate/collections/functions.php',
+        '/illuminate/events/functions.php',
 
-    // Symfony polyfills
-    '/symfony/polyfill-mbstring/bootstrap.php',
-    '/symfony/polyfill-php83/bootstrap.php',
+        // Symfony polyfills
+        '/symfony/polyfill-mbstring/bootstrap.php',
+        '/symfony/polyfill-php83/bootstrap.php',
 
-    // Translation helpers
-    '/symfony/translation/Resources/functions.php',
+        // Translation helpers
+        '/symfony/translation/Resources/functions.php',
 
-    // UUID helpers
-    '/ramsey/uuid/src/functions.php',
-];
+        // UUID helpers - LOAD WITH CAUTION
+        '/ramsey/uuid/src/functions.php',
+    ];
 
-foreach ($helperFiles as $file) {
-    $fullPath = ARCHETYPE_LIB_PATH . $file;
-    if (file_exists($fullPath)) {
-        require_once $fullPath;
+    foreach ($helperFiles as $file) {
+        $fullPath = ARCHETYPE_LIB_PATH . $file;
+        if (file_exists($fullPath)) {
+            // Special handling for UUID functions to prevent conflicts
+            if (strpos($file, 'ramsey/uuid') !== false) {
+                archetype_load_uuid_functions_safely($fullPath);
+            } else {
+                require_once $fullPath;
+            }
+        }
     }
 }
 
-// Define critical missing Laravel helper functions
+/**
+ * Safely load UUID functions by checking if they already exist
+ */
+function archetype_load_uuid_functions_safely($filePath) {
+    // Get the file content
+    $content = file_get_contents($filePath);
+
+    // Extract function names using regex
+    preg_match_all('/function\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/', $content, $matches);
+    $functionNames = $matches[1];
+
+    $conflictingFunctions = [];
+    $safeFunctions = [];
+
+    // Check which functions already exist
+    foreach ($functionNames as $functionName) {
+        $fullFunctionName = 'Ramsey\\Uuid\\' . $functionName;
+        if (function_exists($fullFunctionName)) {
+            $conflictingFunctions[] = $fullFunctionName;
+        } else {
+            $safeFunctions[] = $functionName;
+        }
+    }
+
+    if (!empty($conflictingFunctions)) {
+        // Log the conflict but don't fail
+        if (function_exists('error_log')) {
+            error_log('Archetype: UUID functions already exist, skipping: ' . implode(', ', $conflictingFunctions));
+        }
+        return;
+    }
+
+    if (!empty($safeFunctions)) {
+        // All functions are safe to load
+        require_once $filePath;
+    }
+}
+
+// Load helper files safely
+archetype_load_helper_files_safely();
+
+// Define critical missing Laravel helper functions if they don't exist
 if (!function_exists('tap')) {
     /**
      * Call the given Closure with the given value then return the value.
