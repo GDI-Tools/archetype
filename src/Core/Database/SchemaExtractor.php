@@ -7,15 +7,10 @@ use Illuminate\Database\Schema\Builder as SchemaBuilder;
 
 class SchemaExtractor {
     private SchemaBuilder $schemaBuilder;
-    private bool $doctrineDbalAvailable;
     private static array $activeTempTables = [];
 
-    public function __construct(
-        SchemaBuilder $schemaBuilder,
-        bool $doctrineDbalAvailable
-    ) {
+    public function __construct(SchemaBuilder $schemaBuilder, bool $doctrineDbalAvailable = false) {
         $this->schemaBuilder = $schemaBuilder;
-        $this->doctrineDbalAvailable = $doctrineDbalAvailable;
 
         // Register shutdown function to cleanup any remaining temp tables
         register_shutdown_function([$this, 'cleanupAllTempTables']);
@@ -38,18 +33,14 @@ class SchemaExtractor {
                 $this->dropTempTableSafely($tempTableName);
             }
 
-            // Create temporary table WITHOUT transaction to avoid nested transaction issues
+            // Create temporary table
             $this->createTempTableWithModel($tempTableName, $model);
 
             // Track this temp table for cleanup
             self::$activeTempTables[$tempTableName] = time();
 
-            // Extract schema using appropriate method
-            if ($this->doctrineDbalAvailable) {
-                $schema = $this->extractSchemaWithDoctrine($tempTableName);
-            } else {
-                $schema = $this->extractSchemaBasic($tempTableName);
-            }
+            // Extract schema using modern Laravel methods
+            $schema = $this->extractSchemaModern($tempTableName);
 
             ArchetypeLogger::debug("Successfully extracted schema for " . get_class($model), [
                 'columns_found' => count($schema)
@@ -72,32 +63,26 @@ class SchemaExtractor {
     }
 
     /**
-     * Generate a shorter temporary table name to avoid MySQL 64-char limit for index names
+     * Generate a shorter temporary table name
      */
     private function generateShortTempTableName(string $modelClass): string {
-        // Use only the class name without namespace
         $className = basename(str_replace('\\', '/', $modelClass));
-
-        // Create a short hash from the full class name + microtime
         $hash = substr(md5($modelClass . microtime(true)), 0, 8);
-
-        // Keep it short: tmp_[ClassName]_[8chars]
         return 'tmp_' . strtolower($className) . '_' . $hash;
     }
 
     /**
-     * Create temporary table with model schema - FIXED VERSION
+     * Create temporary table with model schema
      */
     private function createTempTableWithModel(string $tempTableName, BaseModel $model): void {
         try {
-            // Create table normally without wrapper to avoid type issues
             $this->schemaBuilder->create($tempTableName, function ($table) use ($model) {
                 // Add ID if the model uses auto-incrementing
                 if ($model->incrementing) {
                     $table->id();
                 }
 
-                // Call model's schema definition with the actual Blueprint
+                // Call model's schema definition
                 if (method_exists($model, 'defineSchema')) {
                     $model->defineSchema($table);
                 }
@@ -122,149 +107,154 @@ class SchemaExtractor {
     }
 
     /**
-     * Extract schema using Doctrine DBAL with improved error handling
+     * Extract schema using modern Laravel schema inspection methods
      */
-    private function extractSchemaWithDoctrine(string $tableName): array {
+    private function extractSchemaModern(string $tableName): array {
         $schema = [];
 
         try {
-            $conn = $this->schemaBuilder->getConnection();
-
-            // Verify connection is still valid
-            if (!$this->verifyConnection($conn)) {
-                throw new \Exception("Database connection is not valid");
-            }
-
-            $doctrineSchemaManager = $conn->getDoctrineSchemaManager();
-            $platformTableName = $conn->getTablePrefix() . $tableName;
-
-            // Check if table exists before trying to read it
-            if (!$this->schemaBuilder->hasTable($tableName)) {
-                throw new \Exception("Temporary table does not exist: {$tableName}");
-            }
-
-            // Get table columns with retry mechanism
-            $columns = $this->executeWithRetry(function() use ($doctrineSchemaManager, $platformTableName) {
-                return $doctrineSchemaManager->listTableColumns($platformTableName);
-            }, 2);
-
-            foreach ($columns as $column) {
-                $schema[$column->getName()] = [
-                    'name' => $column->getName(),
-                    'type' => strtoupper($this->mapDoctrineType($column->getType()->getName())),
-                    'nullable' => !$column->getNotnull(),
-                    'default' => $column->getDefault(),
-                    'length' => $column->getLength(),
-                    'precision' => $column->getPrecision(),
-                    'scale' => $column->getScale(),
-                    'autoincrement' => $column->getAutoincrement(),
-                    'comment' => $column->getComment(),
-                    'unique' => false // Will be set below
-                ];
-            }
-
-            // Get unique constraints with error handling
-            try {
-                $indices = $this->executeWithRetry(function() use ($doctrineSchemaManager, $platformTableName) {
-                    return $doctrineSchemaManager->listTableIndexes($platformTableName);
-                }, 2);
-
-                foreach ($indices as $index) {
-                    if ($index->isUnique() && count($index->getColumns()) === 1) {
-                        $columnName = $index->getColumns()[0];
-                        if (isset($schema[$columnName])) {
-                            $schema[$columnName]['unique'] = true;
-                        }
-                    }
-                }
-            } catch (\Exception $e) {
-                ArchetypeLogger::warning("Could not extract index information", [
-                    'table' => $tableName,
-                    'error' => $e->getMessage()
-                ]);
-                // Continue without index information
-            }
-
-        } catch (\Exception $e) {
-            ArchetypeLogger::error("Doctrine schema extraction failed", [
-                'table' => $tableName,
-                'error' => $e->getMessage()
-            ]);
-            throw $e;
-        }
-
-        return $schema;
-    }
-
-    /**
-     * Extract schema using basic SQL queries
-     */
-    private function extractSchemaBasic(string $tableName): array {
-        $schema = [];
-
-        try {
-            $conn = $this->schemaBuilder->getConnection();
-
-            // Verify connection is still valid
-            if (!$this->verifyConnection($conn)) {
-                throw new \Exception("Database connection is not valid");
-            }
-
-            $prefix = $conn->getTablePrefix();
-            $fullTableName = $prefix . $tableName;
+            $connection = $this->schemaBuilder->getConnection();
 
             // Check if table exists
             if (!$this->schemaBuilder->hasTable($tableName)) {
                 throw new \Exception("Temporary table does not exist: {$tableName}");
             }
 
-            // Get columns with retry mechanism
-            $columns = $this->executeWithRetry(function() use ($conn, $fullTableName) {
-                return $conn->select("SHOW COLUMNS FROM `{$fullTableName}`");
-            }, 3);
-
-            if (empty($columns)) {
-                throw new \Exception("No columns found for table: {$tableName}");
+            // Use modern Laravel Schema methods if available (Laravel 9+)
+            if (method_exists($this->schemaBuilder, 'getColumns')) {
+                ArchetypeLogger::debug("Using Laravel Schema::getColumns() method");
+                return $this->extractWithSchemaGetColumns($tableName);
             }
 
+            // Use Laravel Schema::getColumnListing() and detailed queries (Laravel 8+)
+            if (method_exists($this->schemaBuilder, 'getColumnListing')) {
+                ArchetypeLogger::debug("Using Laravel Schema::getColumnListing() method");
+                return $this->extractWithColumnListing($tableName);
+            }
+
+            // Fallback to direct SQL queries
+            ArchetypeLogger::debug("Using direct SQL queries fallback");
+            return $this->extractWithDirectSQL($tableName);
+
+        } catch (\Exception $e) {
+            ArchetypeLogger::error("Modern schema extraction failed", [
+                'table' => $tableName,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Extract schema using Laravel's getColumns() method (Laravel 9+)
+     */
+    private function extractWithSchemaGetColumns(string $tableName): array {
+        $schema = [];
+
+        try {
+            $columns = $this->schemaBuilder->getColumns($tableName);
+
             foreach ($columns as $column) {
+                $name = $column['name'];
+                $type = $this->normalizeColumnType($column['type'] ?? $column['type_name'] ?? 'varchar');
+
+                $schema[$name] = [
+                    'name' => $name,
+                    'type' => strtoupper($type),
+                    'nullable' => $column['nullable'] ?? false,
+                    'default' => $column['default'] ?? null,
+                    'autoincrement' => $column['auto_increment'] ?? false,
+                    'length' => $this->extractLength($column),
+                    'precision' => $this->extractPrecision($column),
+                    'scale' => $this->extractScale($column),
+                    'unique' => false, // Will be determined separately
+                ];
+            }
+
+            // Get indexes if method exists
+            if (method_exists($this->schemaBuilder, 'getIndexes')) {
+                $this->addIndexInformation($tableName, $schema);
+            }
+
+        } catch (\Exception $e) {
+            ArchetypeLogger::warning("getColumns() method failed, falling back", [
+                'error' => $e->getMessage()
+            ]);
+            return $this->extractWithColumnListing($tableName);
+        }
+
+        return $schema;
+    }
+
+    /**
+     * Extract schema using getColumnListing() and detailed queries
+     */
+    private function extractWithColumnListing(string $tableName): array {
+        $schema = [];
+
+        try {
+            $connection = $this->schemaBuilder->getConnection();
+            $columns = $this->schemaBuilder->getColumnListing($tableName);
+
+            foreach ($columns as $columnName) {
+                // Get column details using SHOW COLUMNS
+                $columnInfo = $this->getColumnDetails($tableName, $columnName);
+
+                if ($columnInfo) {
+                    $schema[$columnName] = $columnInfo;
+                }
+            }
+
+            // Add index information
+            $this->addIndexInformationSQL($tableName, $schema);
+
+        } catch (\Exception $e) {
+            ArchetypeLogger::warning("getColumnListing() method failed, falling back", [
+                'error' => $e->getMessage()
+            ]);
+            return $this->extractWithDirectSQL($tableName);
+        }
+
+        return $schema;
+    }
+
+    /**
+     * Extract schema using direct SQL queries (fallback)
+     */
+    private function extractWithDirectSQL(string $tableName): array {
+        $schema = [];
+
+        try {
+            $connection = $this->schemaBuilder->getConnection();
+            $prefix = $connection->getTablePrefix();
+            $fullTableName = $prefix . $tableName;
+
+            // Get columns using SHOW COLUMNS
+            $columns = $connection->select("SHOW COLUMNS FROM `{$fullTableName}`");
+
+            foreach ($columns as $column) {
+                $field = $column->Field;
                 $typeInfo = $this->parseColumnType($column->Type);
 
-                $schema[$column->Field] = [
-                    'name' => $column->Field,
+                $schema[$field] = [
+                    'name' => $field,
                     'type' => strtoupper($typeInfo['type']),
                     'length' => $typeInfo['length'] ?? null,
                     'precision' => $typeInfo['precision'] ?? null,
                     'scale' => $typeInfo['scale'] ?? null,
-                    'nullable' => $column->Null === 'YES',
+                    'nullable' => strtoupper($column->Null) === 'YES',
                     'default' => $column->Default,
                     'unique' => $column->Key === 'UNI',
                     'primary' => $column->Key === 'PRI',
-                    'autoincrement' => strpos($column->Extra ?? '', 'auto_increment') !== false,
+                    'autoincrement' => strpos(strtolower($column->Extra ?? ''), 'auto_increment') !== false,
                 ];
             }
 
-            // Get additional index information with error handling
-            try {
-                $indices = $this->executeWithRetry(function() use ($conn, $fullTableName) {
-                    return $conn->select("SHOW INDEXES FROM `{$fullTableName}`");
-                }, 2);
-
-                foreach ($indices as $index) {
-                    if ($index->Non_unique == 0 && isset($schema[$index->Column_name])) {
-                        $schema[$index->Column_name]['unique'] = true;
-                    }
-                }
-            } catch (\Exception $e) {
-                ArchetypeLogger::warning("Could not get index information", [
-                    'table' => $tableName,
-                    'error' => $e->getMessage()
-                ]);
-                // Continue without additional index information
-            }
+            // Get index information
+            $this->addIndexInformationSQL($tableName, $schema);
 
         } catch (\Exception $e) {
-            ArchetypeLogger::error("Basic schema extraction failed", [
+            ArchetypeLogger::error("Direct SQL extraction failed", [
                 'table' => $tableName,
                 'error' => $e->getMessage()
             ]);
@@ -275,42 +265,94 @@ class SchemaExtractor {
     }
 
     /**
-     * Execute a function with retry mechanism
+     * Get detailed column information
      */
-    private function executeWithRetry(callable $function, int $maxRetries = 3, int $delayMs = 100) {
-        $lastException = null;
+    private function getColumnDetails(string $tableName, string $columnName): ?array {
+        try {
+            $connection = $this->schemaBuilder->getConnection();
+            $prefix = $connection->getTablePrefix();
+            $fullTableName = $prefix . $tableName;
 
-        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
-            try {
-                return $function();
-            } catch (\Exception $e) {
-                $lastException = $e;
+            $result = $connection->select(
+                "SHOW COLUMNS FROM `{$fullTableName}` WHERE Field = ?",
+                [$columnName]
+            );
 
-                ArchetypeLogger::warning("Execution attempt {$attempt}/{$maxRetries} failed", [
-                    'error' => $e->getMessage()
-                ]);
-
-                if ($attempt < $maxRetries) {
-                    usleep($delayMs * 1000 * $attempt); // Exponential backoff
-                }
+            if (empty($result)) {
+                return null;
             }
-        }
 
-        throw $lastException;
+            $column = $result[0];
+            $typeInfo = $this->parseColumnType($column->Type);
+
+            return [
+                'name' => $column->Field,
+                'type' => strtoupper($typeInfo['type']),
+                'length' => $typeInfo['length'] ?? null,
+                'precision' => $typeInfo['precision'] ?? null,
+                'scale' => $typeInfo['scale'] ?? null,
+                'nullable' => strtoupper($column->Null) === 'YES',
+                'default' => $column->Default,
+                'unique' => $column->Key === 'UNI',
+                'primary' => $column->Key === 'PRI',
+                'autoincrement' => strpos(strtolower($column->Extra ?? ''), 'auto_increment') !== false,
+            ];
+
+        } catch (\Exception $e) {
+            ArchetypeLogger::warning("Failed to get column details for {$columnName}", [
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
     }
 
     /**
-     * Verify database connection is still valid
+     * Add index information using Laravel's getIndexes() method
      */
-    private function verifyConnection($connection): bool {
+    private function addIndexInformation(string $tableName, array &$schema): void {
         try {
-            $connection->select('SELECT 1');
-            return true;
+            $indexes = $this->schemaBuilder->getIndexes($tableName);
+
+            foreach ($indexes as $index) {
+                if (!empty($index['unique']) && count($index['columns']) === 1) {
+                    $columnName = $index['columns'][0];
+                    if (isset($schema[$columnName])) {
+                        $schema[$columnName]['unique'] = true;
+                    }
+                }
+            }
         } catch (\Exception $e) {
-            ArchetypeLogger::warning("Database connection verification failed", [
+            ArchetypeLogger::warning("Failed to get index information using getIndexes()", [
                 'error' => $e->getMessage()
             ]);
-            return false;
+            // Fallback to SQL method
+            $this->addIndexInformationSQL($tableName, $schema);
+        }
+    }
+
+    /**
+     * Add index information using SQL queries
+     */
+    private function addIndexInformationSQL(string $tableName, array &$schema): void {
+        try {
+            $connection = $this->schemaBuilder->getConnection();
+            $prefix = $connection->getTablePrefix();
+            $fullTableName = $prefix . $tableName;
+
+            $indexes = $connection->select("SHOW INDEXES FROM `{$fullTableName}`");
+
+            foreach ($indexes as $index) {
+                $columnName = $index->Column_name;
+                $isUnique = $index->Non_unique == 0;
+
+                if ($isUnique && isset($schema[$columnName])) {
+                    $schema[$columnName]['unique'] = true;
+                }
+            }
+        } catch (\Exception $e) {
+            ArchetypeLogger::warning("Failed to get index information using SQL", [
+                'error' => $e->getMessage()
+            ]);
         }
     }
 
@@ -323,8 +365,7 @@ class SchemaExtractor {
         $precision = null;
         $scale = null;
 
-        // Handle complex type definitions
-        if (preg_match('/^([a-z]+)\((\d+)(?:,(\d+))?\)/', strtolower($typeString), $matches)) {
+        if (preg_match('/^([a-z]+)\((\d+)(?:,(\d+))?\)/i', $typeString, $matches)) {
             $type = $matches[1];
             $length = (int)$matches[2];
 
@@ -332,7 +373,7 @@ class SchemaExtractor {
                 $scale = (int)$matches[3];
                 $precision = $length;
             }
-        } elseif (preg_match('/^([a-z]+)/', strtolower($typeString), $matches)) {
+        } elseif (preg_match('/^([a-z]+)/i', $typeString, $matches)) {
             $type = $matches[1];
         }
 
@@ -345,33 +386,43 @@ class SchemaExtractor {
     }
 
     /**
-     * Map Doctrine DBAL types to MySQL types
+     * Normalize column type names
      */
-    private function mapDoctrineType(string $doctrineType): string {
-        $map = [
-            'smallint' => 'SMALLINT',
-            'integer' => 'INT',
-            'bigint' => 'BIGINT',
-            'decimal' => 'DECIMAL',
-            'float' => 'FLOAT',
-            'string' => 'VARCHAR',
-            'text' => 'TEXT',
-            'boolean' => 'TINYINT',
-            'date' => 'DATE',
-            'datetime' => 'DATETIME',
-            'datetimetz' => 'DATETIME',
-            'time' => 'TIME',
-            'blob' => 'BLOB',
-            'binary' => 'BINARY',
-            'uuid' => 'VARCHAR',
-            'json' => 'JSON',
+    private function normalizeColumnType(string $type): string {
+        $type = strtolower($type);
+
+        $mappings = [
+            'int' => 'integer',
+            'bool' => 'boolean',
+            'varchar' => 'string',
         ];
 
-        return $map[$doctrineType] ?? 'VARCHAR';
+        return $mappings[$type] ?? $type;
     }
 
     /**
-     * Safely drop temporary table with error handling
+     * Extract length from column array
+     */
+    private function extractLength(array $column): ?int {
+        return $column['length'] ?? $column['size'] ?? null;
+    }
+
+    /**
+     * Extract precision from column array
+     */
+    private function extractPrecision(array $column): ?int {
+        return $column['precision'] ?? null;
+    }
+
+    /**
+     * Extract scale from column array
+     */
+    private function extractScale(array $column): ?int {
+        return $column['scale'] ?? null;
+    }
+
+    /**
+     * Safely drop temporary table
      */
     private function dropTempTableSafely(string $tempTableName): void {
         try {
@@ -404,7 +455,7 @@ class SchemaExtractor {
     }
 
     /**
-     * Cleanup temporary table and remove from tracking
+     * Cleanup temporary table
      */
     private function cleanupTempTable(string $tempTableName): void {
         $this->dropTempTableSafely($tempTableName);
@@ -412,7 +463,7 @@ class SchemaExtractor {
     }
 
     /**
-     * Cleanup all remaining temporary tables (called on shutdown)
+     * Cleanup all remaining temporary tables
      */
     public function cleanupAllTempTables(): void {
         if (empty(self::$activeTempTables)) {
@@ -431,7 +482,7 @@ class SchemaExtractor {
     }
 
     /**
-     * Get list of active temporary tables (for debugging)
+     * Get list of active temporary tables
      */
     public static function getActiveTempTables(): array {
         return self::$activeTempTables;
