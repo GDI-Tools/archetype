@@ -8,7 +8,6 @@ use Illuminate\Database\Schema\Builder as SchemaBuilder;
 class SchemaExtractor {
     private SchemaBuilder $schemaBuilder;
     private static array $activeTempTables = [];
-    private static int $tableCounter = 0;
 
     public function __construct(SchemaBuilder $schemaBuilder, bool $doctrineDbalAvailable = false) {
         $this->schemaBuilder = $schemaBuilder;
@@ -19,152 +18,63 @@ class SchemaExtractor {
 
     public function extractFromModel(BaseModel $model): array {
         $schema = [];
-        $maxRetries = 3;
-        $tempTableName = null;
+        $tempTableName = $this->generateShortTempTableName(get_class($model));
 
-        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
-            try {
-                $tempTableName = $this->generateShortTempTableName(get_class($model));
+        try {
+            ArchetypeLogger::debug("Starting schema extraction for " . get_class($model), [
+                'temp_table' => $tempTableName
+            ]);
 
-                ArchetypeLogger::debug("Starting schema extraction for " . get_class($model), [
-                    'temp_table' => $tempTableName,
-                    'attempt' => $attempt
+            // Check if temp table already exists and drop it
+            if ($this->schemaBuilder->hasTable($tempTableName)) {
+                ArchetypeLogger::warning("Temp table already exists, dropping it", [
+                    'temp_table' => $tempTableName
                 ]);
-
-                // Force cleanup before creation to prevent collisions
-                $this->forceCleanupTempTable($tempTableName);
-
-                // Create temporary table with retry logic
-                $this->createTempTableWithRetry($tempTableName, $model);
-
-                // Track this temp table for cleanup
-                self::$activeTempTables[$tempTableName] = time();
-
-                // Extract schema using modern Laravel methods
-                $schema = $this->extractSchemaModern($tempTableName);
-
-                ArchetypeLogger::debug("Successfully extracted schema for " . get_class($model), [
-                    'columns_found' => count($schema),
-                    'attempt' => $attempt
-                ]);
-
-                // Success - break out of retry loop
-                break;
-
-            } catch (\Exception $e) {
-                ArchetypeLogger::warning("Schema extraction attempt {$attempt} failed for " . get_class($model), [
-                    'temp_table' => $tempTableName,
-                    'error' => $e->getMessage()
-                ]);
-
-                // Clean up failed attempt
-                if ($tempTableName) {
-                    $this->cleanupTempTable($tempTableName);
-                }
-
-                // If this was the last attempt, log error and return empty schema
-                if ($attempt === $maxRetries) {
-                    ArchetypeLogger::error("Schema extraction failed after {$maxRetries} attempts for " . get_class($model), [
-                        'error' => $e->getMessage()
-                    ]);
-                    $schema = [];
-                }
-
-                // For collision errors (error code 1050), try again with new name
-                if (strpos($e->getMessage(), '1050') !== false) {
-                    ArchetypeLogger::info("Table collision detected, retrying with new name", [
-                        'attempt' => $attempt,
-                        'next_attempt' => $attempt + 1
-                    ]);
-                    continue;
-                }
-
-                // For other errors, don't retry
-                break;
-            } finally {
-                // Always attempt cleanup
-                if ($tempTableName) {
-                    $this->cleanupTempTable($tempTableName);
-                }
+                $this->dropTempTableSafely($tempTableName);
             }
+
+            // Create temporary table
+            $this->createTempTableWithModel($tempTableName, $model);
+
+            // Track this temp table for cleanup
+            self::$activeTempTables[$tempTableName] = time();
+
+            // Extract schema using modern Laravel methods
+            $schema = $this->extractSchemaModern($tempTableName);
+
+            ArchetypeLogger::debug("Successfully extracted schema for " . get_class($model), [
+                'columns_found' => count($schema)
+            ]);
+
+        } catch (\Exception $e) {
+            ArchetypeLogger::error("Schema extraction failed for " . get_class($model), [
+                'temp_table' => $tempTableName,
+                'error' => $e->getMessage()
+            ]);
+
+            // Return empty schema and let migration system handle it gracefully
+            $schema = [];
+        } finally {
+            // Always attempt cleanup
+            $this->cleanupTempTable($tempTableName);
         }
 
         return $schema;
     }
 
     /**
-     * Generate a shorter, safer temporary table name with collision resistance
+     * Generate a shorter temporary table name
      */
     private function generateShortTempTableName(string $modelClass): string {
-        // Increment counter for uniqueness
-        self::$tableCounter++;
-
         $className = basename(str_replace('\\', '/', $modelClass));
-        $shortClass = substr(strtolower($className), 0, 12); // Limit class name to 12 chars
-
-        // Create unique ID with multiple entropy sources
-        $entropy = microtime(true) . getmypid() . random_int(1000, 9999) . self::$tableCounter;
-        $uniqueId = substr(md5($entropy), 0, 10);
-
-        $tableName = 'tmp_' . $shortClass . '_' . $uniqueId;
-
-        // Extra safety check - ensure we don't exceed MySQL's 64-character limit
-        if (strlen($tableName) > 50) { // Leave room for prefixes and indexes
-            $tableName = 'tmp_' . substr(md5($modelClass . $entropy), 0, 20);
-        }
-
-        ArchetypeLogger::debug("Generated temp table name", [
-            'model' => $modelClass,
-            'table_name' => $tableName,
-            'length' => strlen($tableName),
-            'counter' => self::$tableCounter
-        ]);
-
-        return $tableName;
+        $hash = substr(md5($modelClass . microtime(true)), 0, 8);
+        return 'tmp_' . strtolower($className) . '_' . $hash;
     }
 
     /**
-     * Force cleanup of temporary table before creation
+     * Create temporary table with model schema
      */
-    private function forceCleanupTempTable(string $tempTableName): void {
-        try {
-            // Method 1: Use Laravel schema builder
-            if ($this->schemaBuilder->hasTable($tempTableName)) {
-                ArchetypeLogger::debug("Force dropping existing temp table", [
-                    'temp_table' => $tempTableName
-                ]);
-                $this->schemaBuilder->drop($tempTableName);
-            }
-        } catch (\Exception $e) {
-            ArchetypeLogger::debug("Laravel drop failed, trying direct SQL", [
-                'temp_table' => $tempTableName,
-                'error' => $e->getMessage()
-            ]);
-
-            // Method 2: Direct SQL with proper escaping
-            try {
-                $conn = $this->schemaBuilder->getConnection();
-                $prefix = $conn->getTablePrefix();
-                $fullTableName = $prefix . $tempTableName;
-
-                $conn->statement("DROP TABLE IF EXISTS `" . str_replace('`', '``', $fullTableName) . "`");
-
-                ArchetypeLogger::debug("Force dropped temp table via SQL", [
-                    'temp_table' => $tempTableName
-                ]);
-            } catch (\Exception $e2) {
-                ArchetypeLogger::debug("SQL drop also failed, proceeding anyway", [
-                    'temp_table' => $tempTableName,
-                    'error' => $e2->getMessage()
-                ]);
-            }
-        }
-    }
-
-    /**
-     * Create temporary table with collision detection and retry
-     */
-    private function createTempTableWithRetry(string $tempTableName, BaseModel $model): void {
+    private function createTempTableWithModel(string $tempTableName, BaseModel $model): void {
         try {
             $this->schemaBuilder->create($tempTableName, function ($table) use ($model) {
                 // Add ID if the model uses auto-incrementing
@@ -188,18 +98,6 @@ class SchemaExtractor {
             ]);
 
         } catch (\Exception $e) {
-            // Check if this is a table collision error (MySQL error 1050)
-            if (strpos($e->getMessage(), '1050') !== false ||
-                strpos($e->getMessage(), 'already exists') !== false) {
-
-                ArchetypeLogger::warning("Table collision detected during creation", [
-                    'temp_table' => $tempTableName,
-                    'error' => $e->getMessage()
-                ]);
-
-                throw new \Exception("Table collision: " . $e->getMessage());
-            }
-
             ArchetypeLogger::error("Failed to create temporary table", [
                 'temp_table' => $tempTableName,
                 'error' => $e->getMessage()
@@ -524,51 +422,36 @@ class SchemaExtractor {
     }
 
     /**
-     * Safely drop temporary table with multiple methods
+     * Safely drop temporary table
      */
     private function dropTempTableSafely(string $tempTableName): void {
-        $methods = [
-            'laravel_schema' => function() use ($tempTableName) {
-                if ($this->schemaBuilder->hasTable($tempTableName)) {
-                    $this->schemaBuilder->drop($tempTableName);
-                    return true;
-                }
-                return false;
-            },
-            'direct_sql' => function() use ($tempTableName) {
-                $conn = $this->schemaBuilder->getConnection();
-                $prefix = $conn->getTablePrefix();
-                $fullTableName = $prefix . $tempTableName;
-                $conn->statement("DROP TABLE IF EXISTS `" . str_replace('`', '``', $fullTableName) . "`");
-                return true;
-            },
-            'direct_sql_no_prefix' => function() use ($tempTableName) {
-                $conn = $this->schemaBuilder->getConnection();
-                $conn->statement("DROP TABLE IF EXISTS `" . str_replace('`', '``', $tempTableName) . "`");
-                return true;
-            }
-        ];
-
-        foreach ($methods as $methodName => $method) {
-            try {
-                if ($method()) {
-                    ArchetypeLogger::debug("Successfully dropped temp table using {$methodName}", [
-                        'temp_table' => $tempTableName
-                    ]);
-                    return;
-                }
-            } catch (\Exception $e) {
-                ArchetypeLogger::debug("Method {$methodName} failed to drop temp table", [
-                    'temp_table' => $tempTableName,
-                    'error' => $e->getMessage()
+        try {
+            if ($this->schemaBuilder->hasTable($tempTableName)) {
+                $this->schemaBuilder->drop($tempTableName);
+                ArchetypeLogger::debug("Dropped temporary table", [
+                    'temp_table' => $tempTableName
                 ]);
-                continue;
+            }
+        } catch (\Exception $e) {
+            ArchetypeLogger::warning("Could not drop temporary table", [
+                'temp_table' => $tempTableName,
+                'error' => $e->getMessage()
+            ]);
+
+            // Try alternative drop method
+            try {
+                $conn = $this->schemaBuilder->getConnection();
+                $conn->statement("DROP TABLE IF EXISTS `" . $conn->getTablePrefix() . $tempTableName . "`");
+                ArchetypeLogger::debug("Force dropped temporary table", [
+                    'temp_table' => $tempTableName
+                ]);
+            } catch (\Exception $e2) {
+                ArchetypeLogger::error("Failed to force drop temporary table", [
+                    'temp_table' => $tempTableName,
+                    'error' => $e2->getMessage()
+                ]);
             }
         }
-
-        ArchetypeLogger::warning("All methods failed to drop temporary table", [
-            'temp_table' => $tempTableName
-        ]);
     }
 
     /**
