@@ -1,7 +1,7 @@
 {
   "name": "rolis/archetype",
   "description": "A modern attribute-based framework for WordPress plugin development",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "type": "library",
   "license": "GPL-2.0-or-later",
   "authors": [
@@ -42,21 +42,21 @@
   },
   "scripts": {
     "bundle": [
-      "echo '🔧 Bundling dependencies...'",
+      "echo 'Bundling dependencies...'",
       "php bundle-dependencies.php"
     ],
     "build": [
-      "echo '🏗️  Building Archetype framework...'",
+      "echo 'Building Archetype framework...'",
       "composer install --dev --optimize-autoloader",
       "@bundle",
       "composer install --no-dev --optimize-autoloader",
-      "echo '✅ Build complete!'"
+      "echo 'Build complete!'"
     ],
     "clean": [
       "echo '🧹 Cleaning build artifacts...'",
       "rm -rf vendor/",
       "rm -rf lib/",
-      "echo '✅ Clean complete!'"
+      "echo 'Clean complete!'"
     ],
     "test": "phpunit",
     "phpcs": "phpcs --standard=WordPress",
@@ -82,7 +82,7 @@
       "analog/analog"
     ],
     "archetype": {
-      "version": "1.0.9",
+      "version": "1.0.10",
       "build-date": "2025-06-01"
     }
   }
