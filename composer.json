@@ -1,7 +1,7 @@
 {
   "name": "rolis/archetype",
-  "description": "A modern attribute-based framework for WordPress plugin development",
-  "version": "1.0.10",
+  "description": "A modern attribute-based framework for WordPress plugin development with bundled dependencies",
+  "version": "1.0.11",
   "type": "library",
   "license": "GPL-2.0-or-later",
   "authors": [
@@ -14,19 +14,6 @@
   "require": {
     "php": ">=8.2"
   },
-  "require-dev": {
-    "illuminate/database": "^12.0",
-    "illuminate/events": "^12.0",
-    "illuminate/container": "^12.0",
-    "illuminate/support": "^12.0",
-    "ramsey/uuid": "^4.7.6",
-    "doctrine/dbal": "^4.0",
-    "analog/analog": "^1.0",
-    "phpunit/phpunit": "^9.0",
-    "squizlabs/php_codesniffer": "^3.7",
-    "phpstan/phpstan": "^1.0",
-    "wp-coding-standards/wpcs": "^3.0"
-  },
   "autoload": {
     "psr-4": {
       "Archetype\\": "src/"
@@ -35,55 +22,52 @@
       "bootstrap/autoload.php"
     ]
   },
-  "autoload-dev": {
-    "psr-4": {
-      "Archetype\\Tests\\": "tests/"
-    }
-  },
-  "scripts": {
-    "bundle": [
-      "echo 'Bundling dependencies...'",
-      "php bundle-dependencies.php"
-    ],
-    "build": [
-      "echo 'Building Archetype framework...'",
-      "composer install --dev --optimize-autoloader",
-      "@bundle",
-      "composer install --no-dev --optimize-autoloader",
-      "echo 'Build complete!'"
-    ],
-    "clean": [
-      "echo '🧹 Cleaning build artifacts...'",
-      "rm -rf vendor/",
-      "rm -rf lib/",
-      "echo 'Clean complete!'"
-    ],
-    "test": "phpunit",
-    "phpcs": "phpcs --standard=WordPress",
-    "phpcbf": "phpcbf --standard=WordPress",
-    "phpstan": "phpstan analyse"
-  },
-  "config": {
-    "optimize-autoloader": true,
-    "sort-packages": true,
-    "allow-plugins": {
-      "dealerdirect/phpcodesniffer-composer-installer": true
-    }
-  },
-  "minimum-stability": "stable",
   "extra": {
     "bundled-dependencies": [
-      "illuminate/database",
-      "illuminate/support",
+      "illuminate/bus",
+      "illuminate/collections",
+      "illuminate/conditionable",
       "illuminate/container",
+      "illuminate/contracts",
+      "illuminate/database",
       "illuminate/events",
-      "ramsey/uuid",
+      "illuminate/macroable",
+      "illuminate/pipeline",
+      "illuminate/support",
+      "laravel/serializable-closure",
+      "doctrine/inflector",
       "doctrine/dbal",
+      "symfony/clock",
+      "symfony/polyfill-mbstring",
+      "symfony/translation",
+      "psr/container",
+      "brick/math",
+      "nesbot/carbon",
+      "ramsey/uuid",
       "analog/analog"
     ],
     "archetype": {
-      "version": "1.0.10",
-      "build-date": "2025-06-01"
+      "version": "1.0.11",
+      "build-date": "2025-06-01",
+      "bundle-size": "~6.5MB",
+      "conflict-free": true,
+      "illuminate-version": "^12.0"
     }
+  },
+  "keywords": [
+    "wordpress",
+    "plugin",
+    "framework",
+    "bundled",
+    "conflict-free",
+    "illuminate",
+    "orm",
+    "rest-api",
+    "attributes"
+  ],
+  "scripts": {
+    "post-install-cmd": [
+      "echo 'Archetype framework installed with bundled dependencies - no conflicts!'"
+    ]
   }
 }
