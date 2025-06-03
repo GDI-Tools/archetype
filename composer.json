@@ -46,7 +46,7 @@
     "build": [
       "@build:scope"
     ],
-    "build:scope": "php-scoper add-prefix --config=scoper.inc.php --force",
+    "build:scope": "php -d memory_limit=-1 vendor/bin/php-scoper add-prefix --config=scoper.inc.php --force"
   },
   "config": {
     "optimize-autoloader": true,
