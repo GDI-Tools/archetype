@@ -1,4 +1,4 @@
-name: Create Release From Composer Version
+name: Create Release From Composer Version (Build Only)
 
 on:
   push:
@@ -15,9 +15,26 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0 # important to access full git history
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2' # set as needed
+
+      - name: Install Composer dependencies (no dev)
+        run: composer install --no-dev --optimize-autoloader
+
+      - name: Install PHP-Scoper globally
+        run: composer global require humbug/php-scoper
+
+      - name: Add global Composer bin to PATH
+        run: echo "${HOME}/.composer/vendor/bin" >> $GITHUB_PATH
+
+      - name: Run PHP-Scoper
+        run: php-scoper add-prefix --config=scoper.inc.php --force
 
       - name: Get version from composer.json
         id: version
@@ -42,13 +59,20 @@ jobs:
           git tag v${{ steps.version.outputs.VERSION }}
           git push origin v${{ steps.version.outputs.VERSION }}
 
-      - name: Create GitHub Release
+      - name: Zip build folder
+        if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
+        run: |
+          cd build
+          zip -r ../archetype-build-v${{ steps.version.outputs.VERSION }}.zip .
+
+      - name: Create GitHub Release (with build asset)
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
           name: Release v${{ steps.version.outputs.VERSION }}
           body: |
-            Auto-release from composer version v${{ steps.version.outputs.VERSION }}
+            Auto-release from composer version v${{ steps.version.outputs.VERSION }}. This release contains only the scoped build output (see archetype-build-v${{ steps.version.outputs.VERSION }}.zip).
+          files: archetype-build-v${{ steps.version.outputs.VERSION }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

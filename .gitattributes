@@ -10,5 +10,4 @@
 /bundle-dependencies.php  export-ignore
 /debug-autoloader.php     export-ignore
 /test-complete.php        export-ignore
-/vendor                   export-ignore
 /dependency-checker.php   export-ignore
