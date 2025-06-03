@@ -63,7 +63,7 @@ jobs:
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
           cd build
-          zip -r ../archetype-build-v${{ steps.version.outputs.VERSION }}.zip .
+          zip -r ../archetype-v${{ steps.version.outputs.VERSION }}.zip .
 
       - name: Create GitHub Release (with build asset)
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
@@ -72,7 +72,7 @@ jobs:
           tag_name: v${{ steps.version.outputs.VERSION }}
           name: Release v${{ steps.version.outputs.VERSION }}
           body: |
-            Auto-release from composer version v${{ steps.version.outputs.VERSION }}. This release contains only the scoped build output (see archetype-build-v${{ steps.version.outputs.VERSION }}.zip).
-          files: archetype-build-v${{ steps.version.outputs.VERSION }}.zip
+            Auto-release from composer version v${{ steps.version.outputs.VERSION }}. This release contains only the scoped build output (see archetype-v${{ steps.version.outputs.VERSION }}.zip).
+          files: archetype-v${{ steps.version.outputs.VERSION }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
