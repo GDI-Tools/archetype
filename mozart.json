@@ -1,0 +1,32 @@
+{
+  "dep_namespace": "Archetype\\Dependencies\\",
+  "dep_directory": "/src/Dependencies/",
+  "classmap_directory": "/src/Dependencies/",
+  "classmap_prefix": "Archetype_Dependencies_",
+  "packages": [
+    "illuminate/database",
+    "illuminate/events",
+    "illuminate/container",
+    "illuminate/support",
+    "analog/analog",
+    "ramsey/uuid",
+    "doctrine/dbal",
+    "psr/container",
+    "psr/log",
+    "psr/simple-cache",
+    "nesbot/carbon",
+    "voku/portable-ascii",
+    "symfony/translation",
+    "brick/math"
+  ],
+  "excluded_packages": [],
+  "delete_vendor_directories": true,
+  "override_autoload": {
+    "exclude-from-classmap": [
+      "**/Test/**",
+      "**/Tests/**",
+      "**/test/**",
+      "**/tests/**"
+    ]
+  }
+}
