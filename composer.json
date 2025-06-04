@@ -43,16 +43,6 @@
     "phpcs": "phpcs --standard=WordPress",
     "phpcbf": "phpcbf --standard=WordPress",
     "phpstan": "phpstan analyse",
-    "scope": "php-scoper add-prefix --config=scoper.inc.php --force",
-    "build": [
-      "@scope",
-      "./build-scoped.sh"
-    ],
-    "build:production": [
-      "composer install --no-dev --optimize-autoloader",
-      "@build"
-    ],
-    "test:scoped": "php tests/test-scoped-framework.php"
   },
   "config": {
     "optimize-autoloader": true,
