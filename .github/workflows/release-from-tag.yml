@@ -99,28 +99,39 @@ jobs:
           
           echo "✅ Distribution package created"
 
-      - name: Create distribution branch with subtree
+      - name: Push to dist branch (default branch)
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
-          echo "🌿 Creating distribution branch..."
+          echo "🚀 Pushing to dist branch (default branch)..."
           
           # Configure git
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          # Add release folder to git
-          git add release/
-          git commit -m "Prepare distribution for v${{ steps.version.outputs.VERSION }}"
+          # Create new orphan dist branch (completely clean)
+          git checkout --orphan temp-dist
           
-          # Push release folder contents to dist branch using subtree
-          git subtree push --prefix=release origin dist
+          # Remove all files from the new branch
+          git rm -rf . || true
           
-          # Clean up: remove release folder from main branch history
-          git reset --soft HEAD~1
-          git reset HEAD release/
+          # Copy only the release contents to root
+          cp -r release/* .
           rm -rf release/
           
-          echo "✅ Distribution branch created successfully"
+          # Add and commit the clean distribution
+          git add .
+          git commit -m "Distribution build v${{ steps.version.outputs.VERSION }}"
+          
+          # Force push to dist branch (replaces the default branch content)
+          git push origin temp-dist:dist --force
+          
+          # Switch back to main
+          git checkout main
+          
+          # Delete the temporary branch
+          git branch -D temp-dist
+          
+          echo "✅ Successfully pushed to dist branch"
 
       - name: Create release archive for GitHub release
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
@@ -144,13 +155,23 @@ jobs:
           
           echo "✅ Release archive created: archetype-v${{ steps.version.outputs.VERSION }}.zip"
 
-      - name: Create Git tag
+      - name: Create Git tag on dist branch
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
-          echo "🏷️ Creating git tag..."
+          echo "🏷️ Creating git tag on dist branch..."
+          
+          # Checkout dist branch to tag it
+          git fetch origin dist:dist
+          git checkout dist
+          
+          # Create and push tag from dist branch
           git tag v${{ steps.version.outputs.VERSION }}
           git push origin v${{ steps.version.outputs.VERSION }}
-          echo "✅ Tag v${{ steps.version.outputs.VERSION }} created and pushed"
+          
+          # Switch back to main
+          git checkout main
+          
+          echo "✅ Tag v${{ steps.version.outputs.VERSION }} created on dist branch"
 
       - name: Create GitHub Release
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
