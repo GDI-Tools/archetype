@@ -99,14 +99,6 @@ jobs:
           
           echo "✅ Distribution package created"
 
-      - name: Setup SSH for distribution repository
-        if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DIST_REPO_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-
       - name: Push to distribution repository
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
@@ -116,8 +108,8 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          # Clone the distribution repository using SSH
-          git clone git@github.com:GDI-Tools/archetype-packagist.git dist-repo
+          # Clone the distribution repository using HTTPS with PAT
+          git clone https://${{ secrets.PAT_TOKEN }}@github.com/GDI-Tools/archetype-packagist.git dist-repo
           cd dist-repo
           
           # Verify we're in the right repository
@@ -137,8 +129,8 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "Release v${{ steps.version.outputs.VERSION }}"
-            # Explicitly push to the archetype-packagist repository
-            git push git@github.com:GDI-Tools/archetype-packagist.git main
+            # Push to the distribution repository
+            git push origin main
             echo "✅ Successfully pushed to distribution repository"
           fi
           
@@ -181,7 +173,6 @@ jobs:
         run: |
           rm -rf release/
           rm -rf dist-repo/
-          rm -f ~/.ssh/id_rsa
           rm -f archetype-v*.zip
           rm -f ~/.ssh/id_rsa
           echo "🧹 Cleanup completed"
