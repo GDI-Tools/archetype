@@ -7,13 +7,15 @@
 
 namespace Archetype;
 
+require_once dirname(__DIR__) . '/vendor-prefix/autoload.php';
+
 use Archetype\Core\Config\AppConfig;
 use Archetype\Core\Bootstrap\Bootstrapper;
 use Archetype\Core\Controller\ControllerRegistry;
 use Archetype\Core\Database\EloquentManager;
 use Archetype\Core\Database\SchemaMigrator;
 use Archetype\Logging\ArchetypeLogger;
-use Illuminate\Database\Schema\Builder;
+use Archetype\Vendor\Illuminate\Database\Schema\Builder;
 
 class Application {
 	/**

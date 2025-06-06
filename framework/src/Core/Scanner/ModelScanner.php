@@ -13,7 +13,7 @@ namespace Archetype\Core\Scanner;
 use Archetype\Attributes\Model;
 use Archetype\Logging\ArchetypeLogger;
 use Archetype\Models\BaseModel;
-use Illuminate\Support\Str;
+use Archetype\Vendor\Illuminate\Support\Str;
 use ReflectionClass;
 use ReflectionProperty;
 

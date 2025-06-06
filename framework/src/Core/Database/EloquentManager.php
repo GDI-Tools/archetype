@@ -10,11 +10,11 @@
 namespace Archetype\Core\Database;
 
 use Archetype\Logging\ArchetypeLogger;
-use Illuminate\Container\Container;
-use Illuminate\Database\Connection;
-use Illuminate\Database\Schema\Builder;
-use Illuminate\Events\Dispatcher;
-use Illuminate\Database\Capsule\Manager as Capsule;
+use Archetype\Vendor\Illuminate\Container\Container;
+use Archetype\Vendor\Illuminate\Database\Connection;
+use Archetype\Vendor\Illuminate\Database\Schema\Builder;
+use Archetype\Vendor\Illuminate\Events\Dispatcher;
+use Archetype\Vendor\Illuminate\Database\Capsule\Manager as Capsule;
 
 class EloquentManager {
 	/**

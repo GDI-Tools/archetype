@@ -10,10 +10,10 @@
 namespace Archetype\Models;
 
 use Archetype\Logging\ArchetypeLogger;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Model as EloquentModel;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Str;
+use Archetype\Vendor\Illuminate\Database\Eloquent\Builder;
+use Archetype\Vendor\Illuminate\Database\Eloquent\Model as EloquentModel;
+use Archetype\Vendor\Illuminate\Database\Schema\Blueprint;
+use Archetype\Vendor\Illuminate\Support\Str;
 
 abstract class BaseModel extends EloquentModel {
 	/**

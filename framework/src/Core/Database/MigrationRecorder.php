@@ -2,7 +2,7 @@
 namespace Archetype\Core\Database;
 
 use Archetype\Logging\ArchetypeLogger;
-use Illuminate\Database\Schema\Builder as SchemaBuilder;
+use Archetype\Vendor\Illuminate\Database\Schema\Builder as SchemaBuilder;
 
 class MigrationRecorder {
 	private SchemaBuilder $schemaBuilder;

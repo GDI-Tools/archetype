@@ -3,8 +3,9 @@ namespace Archetype\Core\Database;
 
 use Archetype\Logging\ArchetypeLogger;
 use Archetype\Models\BaseModel;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Database\Schema\Builder as SchemaBuilder;
+use Archetype\Vendor\Illuminate\Database\Schema\Blueprint;
+use Archetype\Vendor\Illuminate\Database\Schema\Builder as SchemaBuilder;
+use Archetype\Vendor\Doctrine\DBAL\Driver\AbstractMySQLDriver;
 
 class SchemaMigrator {
 	private SchemaBuilder $schemaBuilder;
@@ -33,7 +34,7 @@ class SchemaMigrator {
 	}
 
 	private function checkDoctrineDbalAvailability(): bool {
-		return class_exists('Doctrine\DBAL\Driver\AbstractMySQLDriver');
+		return class_exists(AbstractMySQLDriver::class);
 	}
 
 	// Main public methods

@@ -17,12 +17,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # important to access full git history
+          fetch-depth: 0 # needed for full git history and tagging
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2' # set as needed
+          php-version: '8.2'
 
       - name: Install Composer dependencies (no dev)
         run: composer install --no-dev --optimize-autoloader
@@ -33,8 +33,14 @@ jobs:
       - name: Add global Composer bin to PATH
         run: echo "${HOME}/.composer/vendor/bin" >> $GITHUB_PATH
 
+      - name: Clean previous vendor-prefix if any
+        run: rm -rf framework/vendor-prefix
+
       - name: Run PHP-Scoper
-        run: php-scoper add-prefix --config=scoper.inc.php --force
+        run: php-scoper add-prefix --output-dir=framework/vendor-prefix --config=scoper.inc.php --force
+
+      - name: Run composer autoload
+        run: COMPOSER_VENDOR_DIR=framework/vendor-prefix composer dump-autoload
 
       - name: Get version from composer.json
         id: version
@@ -51,6 +57,16 @@ jobs:
             echo "TAG_EXISTS=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Package release contents (src + vendor-prefix + composer.json)
+        if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
+        run: |
+          mkdir release
+          cp -r framework/src release/
+          cp -r framework/vendor-prefix release/
+          cp framework/composer.json release/
+          cd release
+          zip -r ../framework-release-v${{ steps.version.outputs.VERSION }}.zip .
+
       - name: Create Git tag
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
@@ -59,20 +75,10 @@ jobs:
           git tag v${{ steps.version.outputs.VERSION }}
           git push origin v${{ steps.version.outputs.VERSION }}
 
-      - name: Zip build folder
+      - name: Create GitHub Release
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
-        run: |
-          cd build
-          zip -r ../archetype-v${{ steps.version.outputs.VERSION }}.zip .
-
-      - name: Create GitHub Release (with build asset)
-        if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
-          name: Release v${{ steps.version.outputs.VERSION }}
-          body: |
-            Auto-release from composer version v${{ steps.version.outputs.VERSION }}. This release contains only the scoped build output (see archetype-v${{ steps.version.outputs.VERSION }}.zip).
-          files: archetype-v${{ steps.version.outputs.VERSION }}.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: v${{ steps.version.outputs.VERSION }}
+          files: framework-release-v${{ steps.version.outputs.VERSION }}.zip

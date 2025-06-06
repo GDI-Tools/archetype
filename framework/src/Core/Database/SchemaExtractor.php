@@ -3,14 +3,14 @@ namespace Archetype\Core\Database;
 
 use Archetype\Logging\ArchetypeLogger;
 use Archetype\Models\BaseModel;
-use Illuminate\Database\Schema\Builder as SchemaBuilder;
+use Archetype\Vendor\Illuminate\Database\Schema\Builder as SchemaBuilder;
 
 class SchemaExtractor {
-    private SchemaBuilder $schemaBuilder;
+    private $schemaBuilder;
     private static array $activeTempTables = [];
     private static int $tableCounter = 0;
 
-    public function __construct(SchemaBuilder $schemaBuilder, bool $doctrineDbalAvailable = false) {
+    public function __construct( $schemaBuilder, bool $doctrineDbalAvailable = false) {
         $this->schemaBuilder = $schemaBuilder;
 
         // Register shutdown function to cleanup any remaining temp tables

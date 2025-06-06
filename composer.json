@@ -1,7 +1,7 @@
 {
   "name": "rolis/archetype",
   "description": "A modern attribute-based framework for WordPress plugin development",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "library",
   "license": "GPL-2.0-or-later",
   "authors": [
@@ -14,12 +14,12 @@
   "require": {
     "php": ">=8.2",
     "analog/analog": "^1.0",
+    "doctrine/dbal": "^3.0",
+    "illuminate/container": "^12.17.0",
     "illuminate/database": "^12.17.0",
     "illuminate/events": "^12.17.0",
-    "illuminate/container": "^12.17.0",
     "illuminate/support": "^12.17.0",
-    "ramsey/uuid": "^4.7.6",
-    "doctrine/dbal": "^3.0"
+    "ramsey/uuid": "^4.7.6"
   },
   "require-dev": {
     "phpstan/phpstan": "^1.0",
@@ -29,8 +29,7 @@
   },
   "autoload": {
     "psr-4": {
-      "Archetype\\": "src/",
-      "Archetype\\Dependencies\\": "src/Dependencies/"
+      "Archetype\\": "src/"
     }
   },
   "autoload-dev": {
@@ -42,23 +41,9 @@
     "optimize-autoloader": true,
     "sort-packages": true,
     "allow-plugins": {
-      "dealerdirect/phpcodesniffer-composer-installer": true
+      "composer/installers": true,
+      "dealerdirect/phpcodesniffer-composer-installer": true,
+      "wpify/scoper": true
     }
-  },
-  "extra": {
-    "mozart": {
-      "dep_namespace": "Archetype\\Dependencies\\",
-      "dep_directory": "/src/Dependencies/",
-      "classmap_directory": "/src/Dependencies/classes/",
-      "classmap_prefix": "Archetype_Dep_",
-      "packages": "auto-discover",
-      "excluded_packages": [],
-      "delete_vendor_directories": false
-    },
-    "wordpress": {
-      "tested": "6.4",
-      "requires": "5.0"
-    }
-  },
-  "minimum-stability": "stable"
+  }
 }

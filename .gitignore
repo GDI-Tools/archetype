@@ -1,3 +1,6 @@
 .idea
 /vendor
 /build
+bin/strauss.phar
+vendor-build
+/framework/vendor-prefix
