@@ -93,6 +93,7 @@ jobs:
           cp -r framework/src release/
           cp -r framework/vendor-prefix release/
           cp framework/composer.json release/
+          cp framework/README.md release/
           [ -f "CHANGELOG.md" ] && cp CHANGELOG.md release/ || echo "No CHANGELOG.md found"
           echo "✅ Distribution package created"
 
