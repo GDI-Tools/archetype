@@ -99,45 +99,46 @@ jobs:
           
           echo "✅ Distribution package created"
 
-      - name: Create distribution branch with subtree
+      - name: Push to distribution repository
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
-          echo "🌿 Creating distribution branch..."
+          echo "🚀 Pushing to distribution repository..."
           
           # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          # Add release folder to git
-          git add release/
-          git commit -m "Prepare distribution for v${{ steps.version.outputs.VERSION }}"
+          # Clone the distribution repository using HTTPS with token
+          git clone https://${{ secrets.GITHUB_TOKEN }}@github.com/GDI-Tools/archetype-packagist.git dist-repo
+          cd dist-repo
           
-          # Push release folder contents to dist branch using subtree
-          git subtree push --prefix=release origin dist
+          # Remove all existing files (clean slate)
+          rm -rf * .[^.]*
           
-          # Clean up: remove release folder from main branch history
-          git reset --soft HEAD~1
-          git reset HEAD release/
-          rm -rf release/
+          # Copy release contents to distribution repo
+          cp -r ../release/* .
           
-          echo "✅ Distribution branch created successfully"
+          # Add and commit all changes
+          git add .
+          
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Release v${{ steps.version.outputs.VERSION }}"
+            git push origin main
+            echo "✅ Successfully pushed to distribution repository"
+          fi
+          
+          cd ..
+          rm -rf dist-repo
 
       - name: Create release archive for GitHub release
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
           echo "📦 Creating release archive..."
           
-          # Recreate release folder for archive
-          mkdir -p release
-          cp -r framework/src release/
-          cp -r framework/vendor-prefix release/
-          cp framework/composer.json release/
-          [ -d "docs" ] && cp -r docs release/
-          [ -f "README.md" ] && cp README.md release/
-          [ -f "LICENSE" ] && cp LICENSE release/
-          [ -f "CHANGELOG.md" ] && cp CHANGELOG.md release/
-          
-          # Create archive
+          # Create archive from release folder
           cd release
           zip -r ../archetype-v${{ steps.version.outputs.VERSION }}.zip .
           cd ..
@@ -167,5 +168,7 @@ jobs:
         if: always()
         run: |
           rm -rf release/
+          rm -rf dist-repo/
           rm -f archetype-v*.zip
+          rm -f ~/.ssh/id_rsa
           echo "🧹 Cleanup completed"
