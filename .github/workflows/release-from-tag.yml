@@ -1,4 +1,4 @@
-name: Create Release From Composer Version (Build Only)
+- name: Push to distribution repositoryname: Create Release From Composer Version (Build Only)
 
 on:
   push:
@@ -99,7 +99,12 @@ jobs:
           
           echo "✅ Distribution package created"
 
-      - name: Push to distribution repository
+      - name: Verify distribution repository exists
+        if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
+        run: |
+          echo "🔍 Checking if archetype-packagist repository exists..."
+          curl -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+               https://api.github.com/repos/GDI-Tools/archetype-packagist
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
           echo "🚀 Pushing to distribution repository..."
@@ -108,18 +113,38 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
+          # First, let's test if we can access the distribution repository
+          echo "🔍 Testing access to distribution repository..."
+          if ! git ls-remote https://${{ secrets.PAT_TOKEN }}@github.com/GDI-Tools/archetype-packagist.git HEAD; then
+            echo "❌ Cannot access archetype-packagist repository. Check PAT_TOKEN permissions."
+            exit 1
+          fi
+          echo "✅ Access to distribution repository confirmed"
+          
           # Clone the distribution repository using HTTPS with PAT
+          echo "📥 Cloning archetype-packagist repository..."
           git clone https://${{ secrets.PAT_TOKEN }}@github.com/GDI-Tools/archetype-packagist.git dist-repo
           cd dist-repo
           
           # Verify we're in the right repository
-          echo "📍 Current repository: $(git remote get-url origin)"
+          REPO_URL=$(git remote get-url origin)
+          echo "📍 Current repository: $REPO_URL"
+          
+          # Double check we're in the right place
+          if [[ "$REPO_URL" != *"archetype-packagist"* ]]; then
+            echo "❌ ERROR: Wrong repository! Expected archetype-packagist but got: $REPO_URL"
+            exit 1
+          fi
           
           # Remove all existing files (clean slate)
           rm -rf * .[^.]*
           
           # Copy release contents to distribution repo
           cp -r ../release/* .
+          
+          # Show what we're about to commit
+          echo "📋 Files to be committed:"
+          ls -la
           
           # Add and commit all changes
           git add .
@@ -129,9 +154,10 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "Release v${{ steps.version.outputs.VERSION }}"
-            # Push to the distribution repository
-            git push origin main
-            echo "✅ Successfully pushed to distribution repository"
+            # Push to the distribution repository - be very explicit
+            echo "📤 Pushing to archetype-packagist repository..."
+            git push https://${{ secrets.PAT_TOKEN }}@github.com/GDI-Tools/archetype-packagist.git main
+            echo "✅ Successfully pushed to distribution repository: archetype-packagist"
           fi
           
           cd ..
