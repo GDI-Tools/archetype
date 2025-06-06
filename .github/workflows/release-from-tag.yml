@@ -17,18 +17,32 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # needed for full git history and tagging
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
+          tools: composer
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
 
       - name: Install Composer dependencies (no dev)
-        run: composer install --no-dev --optimize-autoloader
+        run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
 
       - name: Install PHP-Scoper globally
-        run: composer global require humbug/php-scoper
+        run: composer global require humbug/php-scoper --no-interaction
 
       - name: Add global Composer bin to PATH
         run: echo "${HOME}/.composer/vendor/bin" >> $GITHUB_PATH
@@ -39,46 +53,119 @@ jobs:
       - name: Run PHP-Scoper
         run: php-scoper add-prefix --output-dir=framework/vendor-prefix --config=scoper.inc.php --force
 
-      - name: Run composer autoload
-        run: COMPOSER_VENDOR_DIR=framework/vendor-prefix composer dump-autoload
+      - name: Run composer autoload dump
+        run: COMPOSER_VENDOR_DIR=framework/vendor-prefix composer dump-autoload --optimize --no-dev
 
       - name: Get version from composer.json
         id: version
         run: |
           VERSION=$(jq -r '.version' composer.json)
+          if [ "$VERSION" = "null" ] || [ -z "$VERSION" ]; then
+            echo "❌ No version found in composer.json"
+            exit 1
+          fi
           echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "📦 Found version: ${VERSION}"
 
       - name: Check if tag already exists
         id: tagcheck
         run: |
           if git rev-parse "v${{ steps.version.outputs.VERSION }}" >/dev/null 2>&1; then
             echo "TAG_EXISTS=true" >> $GITHUB_OUTPUT
+            echo "⏭️ Tag v${{ steps.version.outputs.VERSION }} already exists, skipping release"
           else
             echo "TAG_EXISTS=false" >> $GITHUB_OUTPUT
+            echo "✅ Tag v${{ steps.version.outputs.VERSION }} does not exist, proceeding with release"
           fi
 
-      - name: Package release contents (src + vendor-prefix + composer.json)
+      - name: Create distribution package
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
-          mkdir release
+          echo "📦 Creating distribution package..."
+          
+          # Create release folder with clean structure
+          mkdir -p release
+          
+          # Copy essential files for distribution
           cp -r framework/src release/
           cp -r framework/vendor-prefix release/
           cp framework/composer.json release/
+          
+          # Copy documentation if it exists
+          [ -d "docs" ] && cp -r docs release/ || echo "No docs directory found"
+          [ -f "README.md" ] && cp README.md release/ || echo "No README.md found"
+          [ -f "LICENSE" ] && cp LICENSE release/ || echo "No LICENSE found"
+          [ -f "CHANGELOG.md" ] && cp CHANGELOG.md release/ || echo "No CHANGELOG.md found"
+          
+          echo "✅ Distribution package created"
+
+      - name: Create distribution branch with subtree
+        if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
+        run: |
+          echo "🌿 Creating distribution branch..."
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Add release folder to git
+          git add release/
+          git commit -m "Prepare distribution for v${{ steps.version.outputs.VERSION }}"
+          
+          # Push release folder contents to dist branch using subtree
+          git subtree push --prefix=release origin dist
+          
+          # Clean up: remove release folder from main branch history
+          git reset --soft HEAD~1
+          git reset HEAD release/
+          rm -rf release/
+          
+          echo "✅ Distribution branch created successfully"
+
+      - name: Create release archive for GitHub release
+        if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
+        run: |
+          echo "📦 Creating release archive..."
+          
+          # Recreate release folder for archive
+          mkdir -p release
+          cp -r framework/src release/
+          cp -r framework/vendor-prefix release/
+          cp framework/composer.json release/
+          [ -d "docs" ] && cp -r docs release/
+          [ -f "README.md" ] && cp README.md release/
+          [ -f "LICENSE" ] && cp LICENSE release/
+          [ -f "CHANGELOG.md" ] && cp CHANGELOG.md release/
+          
+          # Create archive
           cd release
-          zip -r ../archetype.zip .
+          zip -r ../archetype-v${{ steps.version.outputs.VERSION }}.zip .
+          cd ..
+          
+          echo "✅ Release archive created: archetype-v${{ steps.version.outputs.VERSION }}.zip"
 
       - name: Create Git tag
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          echo "🏷️ Creating git tag..."
           git tag v${{ steps.version.outputs.VERSION }}
           git push origin v${{ steps.version.outputs.VERSION }}
+          echo "✅ Tag v${{ steps.version.outputs.VERSION }} created and pushed"
 
       - name: Create GitHub Release
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
-          name: v${{ steps.version.outputs.VERSION }}
-          files: archetype.zip
+          name: "Release v${{ steps.version.outputs.VERSION }}"
+          files: archetype-v${{ steps.version.outputs.VERSION }}.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+
+      - name: Clean up temporary files
+        if: always()
+        run: |
+          rm -rf release/
+          rm -f archetype-v*.zip
+          echo "🧹 Cleanup completed"
