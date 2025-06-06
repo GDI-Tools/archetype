@@ -93,9 +93,6 @@ jobs:
           cp -r framework/src release/
           cp -r framework/vendor-prefix release/
           cp framework/composer.json release/
-          [ -d "docs" ] && cp -r docs release/ || echo "No docs directory found"
-          [ -f "README.md" ] && cp README.md release/ || echo "No README.md found"
-          [ -f "LICENSE" ] && cp LICENSE release/ || echo "No LICENSE found"
           [ -f "CHANGELOG.md" ] && cp CHANGELOG.md release/ || echo "No CHANGELOG.md found"
           echo "✅ Distribution package created"
 
@@ -132,6 +129,15 @@ jobs:
             git push origin main
             echo "✅ Release pushed to archetype-packagist"
           fi
+
+      - name: Create Git tag in archetype-packagist
+        if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
+        run: |
+          cd /tmp/dist-repo
+          git tag v${{ steps.version.outputs.VERSION }}
+          git push origin v${{ steps.version.outputs.VERSION }}
+          echo "🏷️ Tag v${{ steps.version.outputs.VERSION }} created and pushed in archetype-packagist"
+      
 
       - name: Create release archive
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'

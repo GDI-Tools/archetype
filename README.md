@@ -2,9 +2,8 @@
 
 ![archetype](/docs/images/archetype.png)
 
-**Version:** 1.0.5  
 **Author:** Vitalii Sili  
-**License:** GPL-2.0-or-later
+**License:** MIT
 
 A modern attribute-based framework for WordPress plugin development that leverages PHP 8.2+ features, Eloquent ORM, and powerful automation tools to accelerate plugin development.
 
