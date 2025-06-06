@@ -144,20 +144,13 @@ jobs:
           
           echo "✅ Release archive created: archetype-v${{ steps.version.outputs.VERSION }}.zip"
 
-      - name: Create Git tag on both branches
+      - name: Create Git tag
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
-          echo "🏷️ Creating git tag on main branch..."
+          echo "🏷️ Creating git tag..."
           git tag v${{ steps.version.outputs.VERSION }}
           git push origin v${{ steps.version.outputs.VERSION }}
-          
-          echo "🏷️ Creating git tag on dist branch..."
-          git checkout dist
-          git tag v${{ steps.version.outputs.VERSION }} --force
-          git push origin v${{ steps.version.outputs.VERSION }} --force
-          git checkout main
-          
-          echo "✅ Tag v${{ steps.version.outputs.VERSION }} created on both branches"
+          echo "✅ Tag v${{ steps.version.outputs.VERSION }} created and pushed"
 
       - name: Create GitHub Release
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
