@@ -99,22 +99,22 @@ jobs:
           [ -f "CHANGELOG.md" ] && cp CHANGELOG.md release/ || echo "No CHANGELOG.md found"
           echo "✅ Distribution package created"
 
-      - name: Push to archetype-packagist repository
+      - name: Clone archetype-packagist outside working repo
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
         run: |
+          echo "📥 Cloning archetype-packagist repository into /tmp..."
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          echo "📥 Cloning archetype-packagist repository..."
-          git clone git@github.com:GDI-Tools/archetype-packagist.git dist-repo
+          git clone git@github.com:GDI-Tools/archetype-packagist.git /tmp/dist-repo
 
-          echo "🧹 Cleaning existing contents in dist-repo..."
-          rm -rf dist-repo/* dist-repo/.[!.]* || true
+          echo "🧹 Cleaning contents..."
+          rm -rf /tmp/dist-repo/* /tmp/dist-repo/.[!.]* || true
 
           echo "📦 Copying release package..."
-          cp -r release/* dist-repo/
+          cp -r release/* /tmp/dist-repo/
 
-          cd dist-repo
+          cd /tmp/dist-repo
 
           REPO_URL=$(git remote get-url origin)
           echo "📍 Confirming repo: $REPO_URL"
@@ -123,16 +123,14 @@ jobs:
             exit 1
           fi
 
-          echo "📋 Files staged for commit:"
+          echo "📋 Committing and pushing..."
           git add .
           if git diff --staged --quiet; then
             echo "ℹ️ No changes to commit"
           else
             git commit -m "Release v${{ steps.version.outputs.VERSION }}"
             git push origin main
-            echo "✅ Successfully pushed to archetype-packagist"
           fi
-      
 
       - name: Create release archive
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
