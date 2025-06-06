@@ -108,7 +108,7 @@ jobs:
           cd /tmp/dist-repo
 
           echo "🧹 Cleaning repo contents (excluding .git)..."
-          find . -mindepth 1 ! -name '.git' ! -path './.git/*' -exec rm -rf {} +
+          find . -mindepth 1 ! -name '.git' ! -path './.git/*' -exec rm -rf {} + 2>/dev/null || true
 
           echo "📦 Copying release package into dist-repo..."
           cp -r $GITHUB_WORKSPACE/release/* .
