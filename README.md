@@ -164,8 +164,11 @@ class ProductController
 
 ## 📄 License
 
-GPL-2.0-or-later - Compatible with WordPress licensing requirements.
+MIT - Compatible with WordPress licensing requirements.
+See [LICENSE](LICENSE)
 
+---
+See all [changelogs](CHANGELOG.md)
 ---
 
 **Ready to supercharge your WordPress plugin development? Start with the [Installation Guide](docs/01-installation.md)!** 🚀
