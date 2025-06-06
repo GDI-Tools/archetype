@@ -107,26 +107,32 @@ jobs:
 
           echo "📥 Cloning archetype-packagist repository..."
           git clone git@github.com:GDI-Tools/archetype-packagist.git dist-repo
+
+          echo "🧹 Cleaning existing contents in dist-repo..."
+          rm -rf dist-repo/* dist-repo/.[!.]* || true
+
+          echo "📦 Copying release package..."
+          cp -r release/* dist-repo/
+
           cd dist-repo
 
-          echo "🧹 Cleaning existing contents..."
-          rm -rf * .[^.]* || true
+          REPO_URL=$(git remote get-url origin)
+          echo "📍 Confirming repo: $REPO_URL"
+          if [[ "$REPO_URL" != *"archetype-packagist"* ]]; then
+            echo "❌ ERROR: Wrong repository. Expected archetype-packagist"
+            exit 1
+          fi
 
-          cp -r ../release/* .
-          echo "📋 Files to be committed:"
-          ls -la
-
+          echo "📋 Files staged for commit:"
           git add .
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "ℹ️ No changes to commit"
           else
             git commit -m "Release v${{ steps.version.outputs.VERSION }}"
             git push origin main
             echo "✅ Successfully pushed to archetype-packagist"
           fi
-
-          cd ..
-          rm -rf dist-repo
+      
 
       - name: Create release archive
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
