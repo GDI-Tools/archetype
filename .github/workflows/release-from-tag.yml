@@ -65,7 +65,7 @@ jobs:
           cp -r framework/vendor-prefix release/
           cp framework/composer.json release/
           cd release
-          zip -r ../framework-release-v${{ steps.version.outputs.VERSION }}.zip .
+          zip -r ../archetype.zip .
 
       - name: Create Git tag
         if: steps.tagcheck.outputs.TAG_EXISTS == 'false'
@@ -81,4 +81,4 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
           name: v${{ steps.version.outputs.VERSION }}
-          files: framework-release-v${{ steps.version.outputs.VERSION }}.zip
+          files: archetype.zip
