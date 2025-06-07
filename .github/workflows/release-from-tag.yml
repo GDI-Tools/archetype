@@ -38,23 +38,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-composer-
 
-      - name: Install Composer dependencies (no dev)
-        run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+      - name: Install Composer dependencies
+        run: composer install
 
-      - name: Install PHP-Scoper globally
-        run: composer global require humbug/php-scoper --no-interaction
-
-      - name: Add global Composer bin to PATH
-        run: echo "${HOME}/.composer/vendor/bin" >> $GITHUB_PATH
-
-      - name: Clean previous vendor-prefix if any
-        run: rm -rf framework/vendor-prefix
-
-      - name: Run PHP-Scoper
-        run: php-scoper add-prefix --output-dir=framework/vendor-prefix --config=scoper.inc.php --force
-
-      - name: Run composer autoload dump
-        run: COMPOSER_VENDOR_DIR=framework/vendor-prefix composer dump-autoload --optimize --no-dev
 
       - name: Get version from composer.json
         id: version
