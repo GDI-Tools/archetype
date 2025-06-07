@@ -1,20 +1,12 @@
-.PHONY: clean-scope scoper autoload write-scope-composer scope
+.PHONY: build clean install framework-composer
 
-# Step 1: Clean existing scoped vendor folder
-clean-scope:
-	rm -rf framework/vendor-prefix || true \
-    rm -f framework/composer.json || true
+# Clean build artifacts
+clean:
+	rm -rf framework/vendor-prefix || true
+	rm -f framework/composer.json || true
 
-# Step 2: Run PHP-Scoper
-scoper:
-	php-scoper add-prefix --output-dir=framework/vendor-prefix --config=scoper.inc.php --force
-
-# Step 3: Dump autoload files into prefixed vendor directory
-autoload:
-	COMPOSER_VENDOR_DIR=framework/vendor-prefix composer dump-autoload
-
-# Step 4: Generate framework/composer.json using root version
-write-scope-composer:
+# Generate framework composer.json
+framework-composer:
 	$(eval VERSION=$(shell jq -r .version composer.json))
 	@mkdir -p framework
 	@echo '{ \
@@ -31,5 +23,10 @@ write-scope-composer:
 	"prefer-stable": true \
 	}' | jq . > framework/composer.json
 
-# Master target: fully scoped framework including new composer.json
-build: clean-scope write-scope-composer scoper autoload
+install:
+	rm composer.lock || true
+	rm -rf vendor || true
+	composer install
+
+# Main build using official Strauss method
+build: clean framework-composer install
