@@ -2,7 +2,8 @@
 
 # Step 1: Clean existing scoped vendor folder
 clean-scope:
-	rm -rf framework/vendor-prefix
+	rm -rf framework/vendor-prefix || true \
+    rm -f framework/composer.json || true
 
 # Step 2: Run PHP-Scoper
 scoper:
@@ -31,4 +32,4 @@ write-scope-composer:
 	}' | jq . > framework/composer.json
 
 # Master target: fully scoped framework including new composer.json
-build: write-scope-composer clean-scope scoper autoload
+build: clean-scope write-scope-composer scoper autoload
