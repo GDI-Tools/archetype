@@ -28,10 +28,15 @@ class TableCreator {
 			// Create the table
 			$this->schemaBuilder->create($tableName, function ($table) use ($model) {
 				// Add ID if the model uses auto-incrementing
-				if ($model->incrementing) {
-					$table->id();
-					ArchetypeLogger::debug("Added auto-incrementing ID field to {$model->getTable()}");
-				}
+                if (property_exists($model, 'incrementing') ? $model->incrementing : true) {
+                    $table->id();
+                    ArchetypeLogger::debug("Added auto-incrementing ID field to {$model->getTable()}");
+                }
+
+//				if ($model->incrementing) {
+//					$table->id();
+//					ArchetypeLogger::debug("Added auto-incrementing ID field to {$model->getTable()}");
+//				}
 
 				// Let the model define its schema
 				ArchetypeLogger::debug("Calling defineSchema() on model " . get_class($model));
